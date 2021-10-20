@@ -3,8 +3,8 @@ package storage
 import (
 	"context"
 	"fmt"
-	"growmon/conf"
 	"log"
+	"monitect/conf"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -74,11 +74,17 @@ func (m *MongoDB) InsertOne(collectionName string, document interface{}) *mongo.
 	return res
 }
 
-func (m *MongoDB) FindById(collectionName string, id string) *mongo.SingleResult {
-	// 2 second timeout for finding a record
+func (m *MongoDB) FindOneByQuery(collectionName string, query bson.M) *mongo.SingleResult {
+	// 2 second timeout for finding a record with a given query
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	collection := m.Db().Collection(collectionName)
-	res := collection.FindOne(ctx, bson.M{"_id": id})
+	res := collection.FindOne(ctx, query)
+	findErr := res.Err()
+	if findErr == mongo.ErrNoDocuments {
+		return nil
+	} else if findErr != nil {
+		log.Fatalf("Got an unrecoverable error %v", findErr)
+	}
 	return res
 }
