@@ -56,7 +56,7 @@ type ListSensorsResponse struct {
 
 func ListSensors(c *gin.Context) {
 	// list sensors
-	listOpts := options.Find().SetSort(bson.D{{"_id", -1}}).SetLimit(10)
+	listOpts := options.Find().SetSort(bson.D{{Key: "createdAt", Value: -1}}).SetLimit(10)
 	queryParams := c.Request.URL.Query()
 	fmt.Println(queryParams)
 	filter := ParamsToFilter(queryParams)

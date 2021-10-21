@@ -54,7 +54,7 @@ type ListSensorReadingsResponse struct {
 
 func ListSensorReadings(c *gin.Context) {
 	// list sensors
-	listOpts := options.Find().SetSort(bson.D{{"createdAt", -1}}).SetLimit(100)
+	listOpts := options.Find().SetSort(bson.D{{Key: "createdAt", Value: -1}}).SetLimit(100)
 	sensorReadings, err := models.ListSensorReadings(bson.D{}, listOpts)
 	if err != nil {
 		log.Println(err)
