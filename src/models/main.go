@@ -1,6 +1,8 @@
 package models
 
-import "monitect/storage"
+import (
+	"go.mongodb.org/mongo-driver/mongo"
+)
 
 // globally available mongodb variable for access within each model
-var DB *storage.MongoDB
+var DB *mongo.Database
