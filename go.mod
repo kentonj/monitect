@@ -1,4 +1,4 @@
-module monitect
+module github.com/kentonj/monitect
 
 go 1.16
 
