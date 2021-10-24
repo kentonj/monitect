@@ -13,7 +13,7 @@ import (
 
 func Connect(config *conf.Config) *gorm.DB {
 	// make the parent directory if necessary
-	parentDir := filepath.Base(config.Database.File)
+	parentDir := filepath.Dir(config.Database.File)
 	err := os.MkdirAll(parentDir, os.ModePerm)
 	if err != nil {
 		panic(err)
