@@ -1,0 +1,6 @@
+Adafruit-Blinka==6.15.0
+adafruit-circuitpython-dht==3.6.2
+Adafruit-PlatformDetect==3.16.1
+Adafruit-PureIO==1.1.9
+requests==2.21.0
+RPi.GPIO==0.7.0
