@@ -4,7 +4,7 @@ services:
   server:
     build:
       context: ./
-    restart: on-failure
+    restart: unless-stopped
     command: ./server
     environment:
       PORT: 8181
@@ -13,6 +13,15 @@ services:
     volumes:
       - data:/go/monitect/data
       - ./conf/:/go/monitect/conf/
+  dht22-1:
+    build:
+      context: ./sensors
+    restart: unless-stopped
+    command: dht22.py -i 300
+    # need to run privileged for access to gpio
+    privileged: true
+    environment:
+      SERVER_URL: "http://server:8181"
 
 volumes:
   data: {}
