@@ -1,6 +1,7 @@
 """Taking measurements from the dht22"""
 import os
 import time
+from datetime import datetime
 from argparse import ArgumentParser
 import requests
 
@@ -66,8 +67,7 @@ def main():
         reading = sample()
         if reading:
             # reading is not none
-            # post it to monitect!
-            print(f'got reading {reading}')
+            print(f'{sensor_name} reading @ {datetime.now()}: {reading}')
             resp = requests.post(f"{base_url}/sensors/{temperature_sensor_id}/readings", json={'value': reading['temperature']})
             if not resp.ok:
                 print(f'something went wrong! {resp.status_code}')

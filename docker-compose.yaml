@@ -22,6 +22,8 @@ services:
     privileged: true
     environment:
       SERVER_URL: "http://server:8181"
+    volumes:
+      - ./sensors/dht22.py:/dht22.py
 
 volumes:
   data: {}
