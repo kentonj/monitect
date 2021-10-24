@@ -4,10 +4,11 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"github.com/google/uuid"
+	"github.com/mattn/go-sqlite3"
 
 	"github.com/kentonj/monitect/src/models"
 )
@@ -28,18 +29,24 @@ func CreateSensorReading(c *gin.Context) {
 		return
 	}
 	// verify that there is a sensor with this id
-	sensorId := c.Param("sensorId")
-	if sensor, err := models.GetSensorById(sensorId); err != nil {
-		c.AbortWithError(http.StatusInternalServerError, err)
-		return
-	} else if sensor == nil {
-		c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"msg": fmt.Sprintf("sensor with id %s not found", sensorId)})
-		return
-	}
-	// now we can safely write a sensor reading
-	newSensorReading, err := models.CreateSensorReading(sensorId, newSensorReadingBody.Value)
+	sensorIdString := c.Param("sensorId")
+	sensorId, err := uuid.Parse(sensorIdString)
 	if err != nil {
 		log.Println(err)
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"msg": fmt.Sprint("malformed sensor id", sensorIdString)})
+		return
+	}
+	newSensorReading, err := models.CreateSensorReading(sensorId, newSensorReadingBody.Value)
+	if err != nil {
+		if sqliteErr, ok := err.(sqlite3.Error); ok {
+			if sqliteErr.ExtendedCode == sqlite3.ErrConstraintForeignKey {
+				c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"msg": "specified sensor id does not exist"})
+			} else {
+				c.AbortWithStatus(http.StatusInternalServerError)
+			}
+		} else {
+			c.AbortWithStatus(http.StatusInternalServerError)
+		}
 		c.AbortWithStatus(http.StatusInternalServerError)
 	} else {
 		c.JSON(http.StatusCreated, CreateSensorReadingResponse{Msg: "Successfully created sensor reading", SensorReading: *newSensorReading})
@@ -54,8 +61,24 @@ type ListSensorReadingsResponse struct {
 
 func ListSensorReadings(c *gin.Context) {
 	// list sensors
-	listOpts := options.Find().SetSort(bson.D{{Key: "createdAt", Value: -1}}).SetLimit(100)
-	sensorReadings, err := models.ListSensorReadings(bson.D{}, listOpts)
+	sensorIdString := c.Param("sensorId")
+	sensorId, err := uuid.Parse(sensorIdString)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"msg": fmt.Sprint("malformed sensor id", sensorIdString)})
+		return
+	}
+	limitString := c.Query("limit")
+	var limit int
+	if limitString != "" {
+		limit, err = strconv.Atoi(limitString)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"msg": fmt.Sprint("invalid limit", limitString)})
+			return
+		}
+	} else {
+		limit = 1000
+	}
+	sensorReadings, err := models.ListSensorReadings(sensorId, limit)
 	if err != nil {
 		log.Println(err)
 		c.AbortWithStatus(http.StatusInternalServerError)

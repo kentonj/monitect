@@ -1,98 +1,67 @@
 package models
 
 import (
-	"context"
-	"errors"
 	"log"
-	"time"
 
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"github.com/google/uuid"
 )
 
-const sensorCollection string = "sensors"
-
 type Sensor struct {
-	ID        interface{} `json:"id" bson:"_id,omitempty"`
-	Name      string      `json:"name" bson:"name"`
-	Type      string      `json:"type" bson:"type"`
-	CreatedAt time.Time   `json:"createdAt" bson:"createdAt"`
+	Base
+	Name string `json:"name" gorm:"unique"`
+	Type string `json:"type"`
 }
 
 func CreateSensor(name string, sensorType string) (s *Sensor, err error) {
 	sensor := Sensor{
-		Name:      name,
-		Type:      sensorType,
-		CreatedAt: time.Now().UTC(),
+		Name: name,
+		Type: sensorType,
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	collection := DB.Collection(sensorCollection)
-	res, err := collection.InsertOne(ctx, sensor)
-	if err != nil {
-		log.Printf("unable to insert record %s", sensor.Name)
-		return nil, errors.New("unable to insert record")
+	if sensorId, err := uuid.NewRandom(); err != nil {
+		return nil, err
 	} else {
-		log.Printf("inserted record: collection %s object id %s", sensorCollection, res.InsertedID)
+		sensor.ID = sensorId
 	}
-	sensor.ID = res.InsertedID
+	res := DB.Create(&sensor)
+	if res.Error != nil {
+		log.Printf("unable to insert record %s: %v", sensor.Name, res.Error)
+		return nil, res.Error
+	} else {
+		log.Printf("Created sensor with id %d", sensor.ID)
+	}
 	return &sensor, nil
-}
-
-func GetSensorByFilter(filter interface{}) (s *Sensor, e error) {
-	// find a sensor by name, return nil if it doesn't exist
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	collection := DB.Collection(sensorCollection)
-	res := collection.FindOne(ctx, filter)
-	findErr := res.Err()
-	if findErr == mongo.ErrNoDocuments {
-		// not an error, consider changing this to be more clear later
-		return nil, nil
-	} else if findErr != nil {
-		return nil, findErr
-	}
-	sensor := new(Sensor)
-	res.Decode(&sensor)
-	return sensor, nil
 }
 
 func GetSensorByName(name string) (s *Sensor, e error) {
 	// find a sensor by name, return nil if it doesn't exist
-	sensor, err := GetSensorByFilter(bson.M{"name": name})
-	if err != nil {
-		return nil, err
+	var sensor Sensor
+	res := DB.First(&sensor, "name = ?", name)
+	if res.Error != nil {
+		return nil, res.Error
+	} else {
+		return &sensor, nil
 	}
-	return sensor, nil
 }
 
-func GetSensorById(id string) (s *Sensor, e error) {
-	// find a sensor by name, return nil if it doesn't exist
-	objectId, err := primitive.ObjectIDFromHex(id)
-	if err != nil {
-		return nil, errors.New("provided hex is not a valid objectID")
+func GetSensorByID(uuid uuid.UUID) (s *Sensor, e error) {
+	// find a sensor by id, return nil if it doesn't exist
+	var sensor Sensor
+	res := DB.First(&sensor, uuid)
+	if res.Error != nil {
+		return nil, res.Error
+	} else {
+		return &sensor, nil
 	}
-	return GetSensorByFilter(bson.M{"_id": objectId})
 }
 
-func ListSensors(filter interface{}, opts *options.FindOptions) (s *[]Sensor, e error) {
-	// default options
-	if opts == nil {
-		opts = options.Find().SetSort(bson.D{{"createdAt", -1}}).SetLimit(10)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(5)*time.Second)
-	defer cancel()
-	cur, err := DB.Collection(sensorCollection).Find(ctx, filter, opts)
-	if err != nil {
-		return nil, errors.New("unable to decode cursor results into sensors")
-	}
-	defer cur.Close(ctx)
+func ListSensors() (s *[]Sensor, e error) {
 	// empty list
 	sensors := make([]Sensor, 0)
-	if err := cur.All(ctx, &sensors); err != nil {
-		return nil, errors.New("unable to decode cursor results into sensors")
+	// LIKE
+	res := DB.Find(&sensors)
+	if res.Error != nil {
+		return nil, res.Error
+	} else {
+		return &sensors, nil
 	}
-	return &sensors, nil
 }

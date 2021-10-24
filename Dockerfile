@@ -1,4 +1,4 @@
-FROM golang:1.17-alpine
+FROM golang:1.17
 
 WORKDIR /go/monitect
 
@@ -11,6 +11,6 @@ COPY cmd/server cmd/server
 COPY src ./src
 COPY conf/server.yaml ./conf/server.yaml
 
-RUN go build -o monitect cmd/server/main.go
-RUN chmod +x ./monitect
-CMD ["./monitect"]
+RUN go build -o server cmd/server/server.go
+RUN chmod +x ./server
+CMD ["./server"]
