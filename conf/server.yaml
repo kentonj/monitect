@@ -1,6 +1,6 @@
-mongo:
-  host: mongo
-  port: 27017
-  db: db
-  username: root
-  password: secret
+database:
+  # this needs to be in a subdirectory (docker-compose volume nuance)
+  file: ./data/server.db
+  init_sql: |
+    PRAGMA foreign_keys = ON;
+  debug: false

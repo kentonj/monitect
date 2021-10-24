@@ -6,8 +6,8 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"github.com/google/uuid"
+	"github.com/mattn/go-sqlite3"
 
 	"github.com/kentonj/monitect/src/models"
 )
@@ -23,26 +23,22 @@ type CreateSensorResponse struct {
 }
 
 func CreateSensor(c *gin.Context) {
-	// register a sensor, error if it already exists
 	newSensorBody := new(CreateSensorBody)
 	if err := c.ShouldBindJSON(&newSensorBody); err != nil {
 		c.AbortWithStatus(http.StatusBadRequest)
 		return
 	}
-	existingSensor, err := models.GetSensorByName(newSensorBody.Name)
-	if err != nil {
-		log.Println(err)
-		c.AbortWithStatus(http.StatusInternalServerError)
-		return
-	} else if existingSensor != nil {
-		log.Println(err)
-		c.AbortWithStatusJSON(http.StatusConflict, gin.H{"error": fmt.Sprintf("sensor with name %s already exists", newSensorBody.Name)})
-		return
-	}
 	newSensor, err := models.CreateSensor(newSensorBody.Name, newSensorBody.Type)
 	if err != nil {
-		log.Println(err)
-		c.AbortWithStatus(http.StatusInternalServerError)
+		if sqliteErr, ok := err.(sqlite3.Error); ok {
+			if sqliteErr.ExtendedCode == sqlite3.ErrConstraintUnique {
+				c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"msg": err.Error()})
+			} else {
+				c.AbortWithStatus(http.StatusInternalServerError)
+			}
+		} else {
+			c.AbortWithStatus(http.StatusInternalServerError)
+		}
 	} else {
 		c.JSON(http.StatusCreated, CreateSensorResponse{Msg: "Successfully created sensor", Sensor: *newSensor})
 	}
@@ -56,13 +52,7 @@ type ListSensorsResponse struct {
 
 func ListSensors(c *gin.Context) {
 	// list sensors
-	listOpts := options.Find().SetSort(bson.D{{Key: "createdAt", Value: -1}}).SetLimit(10)
-	queryParams := c.Request.URL.Query()
-	fmt.Println(queryParams)
-	filter := ParamsToFilter(queryParams)
-	fmt.Println("using the following filter")
-	fmt.Println(filter)
-	sensors, err := models.ListSensors(filter, listOpts)
+	sensors, err := models.ListSensors()
 	if err != nil {
 		log.Println(err)
 		c.AbortWithStatus(http.StatusInternalServerError)
@@ -77,8 +67,12 @@ type GetSensorResponse struct {
 }
 
 func GetSensor(c *gin.Context) {
-	id := c.Param("sensorId")
-	sensor, err := models.GetSensorById(id)
+	idString := c.Param("sensorId")
+	uuid, err := uuid.Parse(idString)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"msg": fmt.Sprint("malformed sensor id", idString)})
+	}
+	sensor, err := models.GetSensorByID(uuid)
 	if err != nil {
 		log.Println(err)
 		c.AbortWithStatus(http.StatusInternalServerError)

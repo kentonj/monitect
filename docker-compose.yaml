@@ -1,24 +1,18 @@
 version: "3.3"
 
 services:
-  mongo:
-    image: mongo:4.4
-    restart: always
-    environment:
-      MONGO_INITDB_ROOT_USERNAME: root
-      MONGO_INITDB_ROOT_PASSWORD: secret
-    volumes:
-      - mongovol:/data/db
   server:
     build:
       context: ./
     restart: on-failure
+    command: ./server
     environment:
       PORT: 8181
     ports:
       - "8181:8181"
-    depends_on:
-      - mongo
+    volumes:
+      - data:/go/monitect/data
+      - ./conf/:/go/monitect/conf/
 
 volumes:
-  mongovol: {}
+  data: {}

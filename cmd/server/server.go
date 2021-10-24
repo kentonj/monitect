@@ -11,11 +11,15 @@ import (
 func main() {
 	// load config
 	config := conf.NewConfig("./conf/server.yaml")
-	// open the mongo connection, we'll pass the mongo connection to the necessary handlers
-	conn := storage.Connect(config)
-	defer conn.Close()
+	// open the sqlite database, pass it to the models
+	db := storage.Connect(config)
 	// assign the db to the models so that it's accessible within the model classes
-	models.DB = conn.Db()
+	if config.Database.Debug {
+		db = db.Debug()
+	}
+	models.DB = db
+	// make sure that schemas are up-to-date
+	models.MigrateSchemas()
 	// initialize router and register routes
 	router := gin.Default()
 	services.RegisterRoutes(router)

@@ -1,59 +1,50 @@
 package models
 
 import (
-	"context"
-	"errors"
-	"log"
-	"time"
-
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
-const sensorReadingCollection = "sensor-readings"
-
 type SensorReading struct {
-	ID        interface{} `json:"id" bson:"_id,omitempty"`
-	SensorId  string      `json:"sensorId" bson:"sensorId"`
-	Value     float64     `json:"value" bson:"value"`
-	CreatedAt time.Time   `json:"createdAt" bson:"createdAt"`
+	Base
+	Value    float64   `json:"value"`
+	SensorID uuid.UUID `json:"-"`
+	Sensor   Sensor    `json:"-"`
 }
 
-func CreateSensorReading(sensorId string, value float64) (s *SensorReading, err error) {
+func CreateSensorReading(sensorID uuid.UUID, value float64) (s *SensorReading, err error) {
 	sensorReading := SensorReading{
-		SensorId:  sensorId,
-		Value:     value,
-		CreatedAt: time.Now().UTC(),
+		Value:    value,
+		SensorID: sensorID,
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	collection := DB.Collection(sensorReadingCollection)
-	res, err := collection.InsertOne(ctx, sensorReading)
-	if err != nil {
-		return nil, errors.New("unable to insert record")
+	if sensorReadingId, err := uuid.NewRandom(); err != nil {
+		return nil, err
 	} else {
-		log.Printf("inserted record: collection %s object id %s", sensorReadingCollection, res.InsertedID)
+		sensorReading.ID = sensorReadingId
 	}
-	sensorReading.ID = res.InsertedID
-	return &sensorReading, nil
+	res := DB.Create(&sensorReading)
+	if res.Error != nil {
+		return nil, res.Error
+	} else {
+		return &sensorReading, nil
+	}
 }
 
-func ListSensorReadings(filter interface{}, opts *options.FindOptions) (s *[]SensorReading, e error) {
-	// default options
-	if opts == nil {
-		opts = options.Find().SetSort(bson.D{{"createdAt", -1}}).SetLimit(1000)
+func FindSensorReadings(query *gorm.DB) (s *[]SensorReading, e error) {
+	sensorsReadings := make([]SensorReading, 0)
+	res := query.Find(&sensorsReadings)
+	if res.Error != nil {
+		return nil, res.Error
+	} else {
+		return &sensorsReadings, nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(5)*time.Second)
-	defer cancel()
-	cur, err := DB.Collection(sensorReadingCollection).Find(ctx, filter, opts)
-	if err != nil {
-		return nil, errors.New("unable to decode cursor results into sensors")
+}
+
+func ListSensorReadings(sensorId uuid.UUID, limit int) (s *[]SensorReading, e error) {
+	// get readings between a date range with a configurable limit, will get the results in desc order
+	if limit == 0 {
+		limit = 1000
 	}
-	defer cur.Close(ctx)
-	// empty list
-	sensorReadings := make([]SensorReading, 0)
-	if err := cur.All(ctx, &sensorReadings); err != nil {
-		return nil, errors.New("unable to decode cursor results into sensors")
-	}
-	return &sensorReadings, nil
+	query := DB.Where("sensor_id = ?", sensorId).Order("created_at desc").Limit(limit)
+	return FindSensorReadings(query)
 }
