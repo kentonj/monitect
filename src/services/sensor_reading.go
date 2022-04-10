@@ -13,30 +13,21 @@ import (
 	"github.com/kentonj/monitect/src/models"
 )
 
-type CreateSensorReadingBody struct {
-	Value float64 `json:"value"`
-}
-
-type CreateSensorReadingResponse struct {
-	Msg           string               `json:"msg"`
-	SensorReading models.SensorReading `json:"sensorReading"`
-}
-
 func CreateSensorReading(c *gin.Context) {
-	newSensorReadingBody := new(CreateSensorReadingBody)
-	if err := c.ShouldBindJSON(&newSensorReadingBody); err != nil {
-		c.AbortWithStatus(http.StatusBadRequest)
-		return
-	}
 	// verify that there is a sensor with this id
 	sensorIdString := c.Param("sensorId")
 	sensorId, err := uuid.Parse(sensorIdString)
 	if err != nil {
 		log.Println(err)
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"msg": fmt.Sprint("malformed sensor id", sensorIdString)})
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"msg": fmt.Sprint("malformed sensor id ", sensorIdString)})
 		return
 	}
-	newSensorReading, err := models.CreateSensorReading(sensorId, newSensorReadingBody.Value)
+	var newSensorReadingBody models.CreateSensorReadingBody
+	if err := c.ShouldBindJSON(&newSensorReadingBody); err != nil {
+		c.AbortWithStatus(http.StatusBadRequest)
+		return
+	}
+	newSensorReading, err := models.CreateSensorReading(sensorId, &newSensorReadingBody)
 	if err != nil {
 		if sqliteErr, ok := err.(sqlite3.Error); ok {
 			if sqliteErr.ExtendedCode == sqlite3.ErrConstraintForeignKey {
@@ -49,14 +40,8 @@ func CreateSensorReading(c *gin.Context) {
 		}
 		c.AbortWithStatus(http.StatusInternalServerError)
 	} else {
-		c.JSON(http.StatusCreated, CreateSensorReadingResponse{Msg: "Successfully created sensor reading", SensorReading: *newSensorReading})
+		c.JSON(http.StatusCreated, models.CreateSensorReadingResponse{Msg: "Successfully created sensor reading", SensorReading: *newSensorReading})
 	}
-}
-
-type ListSensorReadingsResponse struct {
-	Msg            string                 `json:"msg"`
-	SensorReadings []models.SensorReading `json:"sensorsReadings"`
-	Count          int                    `json:"count"`
 }
 
 func ListSensorReadings(c *gin.Context) {
@@ -64,7 +49,7 @@ func ListSensorReadings(c *gin.Context) {
 	sensorIdString := c.Param("sensorId")
 	sensorId, err := uuid.Parse(sensorIdString)
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"msg": fmt.Sprint("malformed sensor id", sensorIdString)})
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"msg": fmt.Sprint("malformed sensor id ", sensorIdString)})
 		return
 	}
 	limitString := c.Query("limit")
@@ -72,7 +57,7 @@ func ListSensorReadings(c *gin.Context) {
 	if limitString != "" {
 		limit, err = strconv.Atoi(limitString)
 		if err != nil {
-			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"msg": fmt.Sprint("invalid limit", limitString)})
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"msg": fmt.Sprint("invalid limit ", limitString)})
 			return
 		}
 	} else {
@@ -83,6 +68,6 @@ func ListSensorReadings(c *gin.Context) {
 		log.Println(err)
 		c.AbortWithStatus(http.StatusInternalServerError)
 	} else {
-		c.JSON(http.StatusOK, ListSensorReadingsResponse{Msg: "OK", SensorReadings: *sensorReadings, Count: len(*sensorReadings)})
+		c.JSON(http.StatusOK, models.ListSensorReadingsResponse{Msg: "OK", SensorReadings: *sensorReadings, Count: len(*sensorReadings)})
 	}
 }

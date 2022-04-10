@@ -1,6 +1,8 @@
 package models
 
 import (
+	"errors"
+
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
@@ -12,18 +14,16 @@ type SensorReading struct {
 	Sensor   Sensor    `json:"-"`
 }
 
-func CreateSensorReading(sensorID uuid.UUID, value float64) (s *SensorReading, err error) {
+func CreateSensorReading(sensorID uuid.UUID, createSensorReadingBody *CreateSensorReadingBody) (s *SensorReading, err error) {
+	if createSensorReadingBody.Value == nil {
+		return nil, errors.New("no value provided")
+	}
 	sensorReading := SensorReading{
-		Value:    value,
+		Value:    *createSensorReadingBody.Value,
 		SensorID: sensorID,
 	}
-	if sensorReadingId, err := uuid.NewRandom(); err != nil {
-		return nil, err
-	} else {
-		sensorReading.ID = sensorReadingId
-	}
-	res := DB.Create(&sensorReading)
-	if res.Error != nil {
+	sensorReading.AssignUUID()
+	if res := DB.Create(&sensorReading); res.Error != nil {
 		return nil, res.Error
 	} else {
 		return &sensorReading, nil
@@ -32,8 +32,7 @@ func CreateSensorReading(sensorID uuid.UUID, value float64) (s *SensorReading, e
 
 func FindSensorReadings(query *gorm.DB) (s *[]SensorReading, e error) {
 	sensorsReadings := make([]SensorReading, 0)
-	res := query.Find(&sensorsReadings)
-	if res.Error != nil {
+	if res := query.Find(&sensorsReadings); res.Error != nil {
 		return nil, res.Error
 	} else {
 		return &sensorsReadings, nil
