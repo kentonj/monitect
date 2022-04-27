@@ -8,9 +8,10 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
-	"github.com/kentonj/monitect/src/conf"
+	"github.com/kentonj/monitect/internal/conf"
 )
 
+// connect, run some pre-initialization if necessary and return a pointer to the database
 func Connect(config *conf.Config) *gorm.DB {
 	// make the parent directory if necessary
 	parentDir := filepath.Dir(config.Database.File)

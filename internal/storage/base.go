@@ -1,16 +1,12 @@
-package models
+package storage
 
 import (
 	"log"
 	"time"
 
 	"github.com/google/uuid"
-
 	"gorm.io/gorm"
 )
-
-// globally available mongodb variable for access within each model
-var DB *gorm.DB
 
 // customize the base if needed
 type Base struct {
@@ -27,11 +23,4 @@ func (b *Base) AssignUUID() {
 	} else {
 		b.ID = id
 	}
-}
-
-func MigrateSchemas() {
-	// migrate all schemas
-	DB.AutoMigrate(&Sensor{}, &SensorReading{})
-	DB.Migrator().CreateConstraint(&SensorReading{}, "Sensor")
-	DB.Migrator().CreateConstraint(&SensorReading{}, "fk_sensor_readings_sensors")
 }
