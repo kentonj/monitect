@@ -62,6 +62,7 @@ func (client *SensorReadingClient) CreateSensorReading(c *gin.Context) {
 		return
 	} else {
 		c.JSON(http.StatusOK, CreateSensorReadingResponse{SensorReading: &sensorReading})
+		return
 	}
 }
 
@@ -92,7 +93,9 @@ func (client *SensorReadingClient) ListSensorReadings(c *gin.Context) {
 	sensorReadings := make([]SensorReading, 0)
 	if res := query.Find(&sensorReadings); res.Error != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"msg": "something went wrong", "details": res.Error})
+		return
 	} else {
 		c.JSON(http.StatusOK, ListSensorReadingsResponse{SensorReadings: &sensorReadings, Count: len(sensorReadings)})
+		return
 	}
 }
