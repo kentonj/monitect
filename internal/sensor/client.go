@@ -64,7 +64,7 @@ func (body *CreateSensorBody) toSensor() (*Sensor, error) {
 }
 
 // create a sensor from a createsensor body
-func (sensorClient *SensorClient) CreateSensor(c *gin.Context) {
+func (client *SensorClient) CreateSensor(c *gin.Context) {
 	var createSensorBody CreateSensorBody
 	if parseErr := c.ShouldBindJSON(&createSensorBody); parseErr != nil {
 		c.AbortWithStatus(http.StatusBadRequest)
@@ -75,7 +75,7 @@ func (sensorClient *SensorClient) CreateSensor(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"err": err})
 		return
 	}
-	if res := sensorClient.db.Create(sensor); res.Error != nil {
+	if res := client.db.Create(sensor); res.Error != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"err": res.Error})
 		return
 	} else {
@@ -85,14 +85,14 @@ func (sensorClient *SensorClient) CreateSensor(c *gin.Context) {
 }
 
 // get a sensor by it's ID
-func (sensorClient *SensorClient) GetSensor(c *gin.Context) {
+func (client *SensorClient) GetSensor(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("sensorId"))
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"err": "not a valid uuid"})
 		return
 	}
 	var sensor Sensor
-	if res := sensorClient.db.First(&sensor, id); res.Error != nil {
+	if res := client.db.First(&sensor, id); res.Error != nil {
 		c.AbortWithStatus(http.StatusNotFound)
 		return
 	} else {
@@ -106,7 +106,7 @@ type UpdateSensorBody struct {
 	Type string `json:"type"`
 }
 
-func (sensorClient *SensorClient) UpdateSensor(c *gin.Context) {
+func (client *SensorClient) UpdateSensor(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("sensorId"))
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"err": "not a valid uuid"})
@@ -118,12 +118,12 @@ func (sensorClient *SensorClient) UpdateSensor(c *gin.Context) {
 		return
 	}
 	var sensor Sensor
-	if res := sensorClient.db.First(&sensor, id); res.Error != nil {
+	if res := client.db.First(&sensor, id); res.Error != nil {
 		c.AbortWithStatus(http.StatusNotFound)
 		return
 	}
 	sensor.Update(&updateSensorBody)
-	if res := sensorClient.db.Save(&sensor); res.Error != nil {
+	if res := client.db.Save(&sensor); res.Error != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"err": res.Error})
 	}
 }
@@ -135,9 +135,9 @@ type ListSensorsResponse struct {
 }
 
 // list sensors
-func (sensorClient *SensorClient) ListSensors(c *gin.Context) {
+func (client *SensorClient) ListSensors(c *gin.Context) {
 	sensors := make([]Sensor, 0)
-	if res := sensorClient.db.Find(&sensors); res.Error != nil {
+	if res := client.db.Find(&sensors); res.Error != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"err": res.Error})
 		return
 	} else {

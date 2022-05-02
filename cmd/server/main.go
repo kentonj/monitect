@@ -3,6 +3,7 @@ package main
 import (
 	"github.com/gin-gonic/gin"
 	"github.com/kentonj/monitect/internal/conf"
+	"github.com/kentonj/monitect/internal/image"
 	"github.com/kentonj/monitect/internal/sensor"
 	"github.com/kentonj/monitect/internal/sensorreading"
 	"github.com/kentonj/monitect/internal/storage"
@@ -12,15 +13,18 @@ func registerRoutes(
 	router *gin.Engine,
 	sensorClient *sensor.SensorClient,
 	sensorReadingClient *sensorreading.SensorReadingClient,
+	imageClient *image.ImageClient,
 ) {
 	// sensor routes
 	router.POST("/sensors", sensorClient.CreateSensor)
 	router.GET("/sensors/:sensorId", sensorClient.GetSensor)
 	router.PUT("/sensors/:sensorId", sensorClient.UpdateSensor)
 	router.GET("/sensors", sensorClient.ListSensors)
-	// // sensor-readings routes
+	// sensor-readings routes
 	router.POST("/sensors/:sensorId/readings", sensorReadingClient.CreateSensorReading)
 	router.GET("/sensors/:sensorId/readings", sensorReadingClient.ListSensorReadings)
+	// image routes
+	router.POST("/sensors/:sensorId/image", imageClient.CreateImage)
 }
 
 func main() {
@@ -36,11 +40,13 @@ func main() {
 	router := gin.Default()
 	sensorClient := sensor.NewSensorClient(db)
 	sensorReadingClient := sensorreading.NewSensorReadingClient(db)
+	imageClient := image.NewImageClient(db)
 
 	registerRoutes(
 		router,
 		sensorClient,
 		sensorReadingClient,
+		imageClient,
 	)
 	router.Run()
 }
