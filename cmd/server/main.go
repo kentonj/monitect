@@ -24,7 +24,9 @@ func registerRoutes(
 	router.POST("/sensors/:sensorId/readings", sensorReadingClient.CreateSensorReading)
 	router.GET("/sensors/:sensorId/readings", sensorReadingClient.ListSensorReadings)
 	// image routes
-	router.POST("/sensors/:sensorId/image", imageClient.CreateImage)
+	router.POST("/sensors/:sensorId/images", imageClient.CreateImage)
+	router.GET("/sensors/:sensorId/images/:imageId", imageClient.GetImage)
+	router.DELETE("/sensors/:sensorId/images", imageClient.TruncateImages)
 }
 
 func main() {

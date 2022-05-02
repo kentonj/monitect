@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -64,11 +65,67 @@ func (client *ImageClient) CreateImage(c *gin.Context) {
 		return
 	}
 	image := NewImage(sensorId, buffer.Bytes())
-	if res := client.db.Save(&image); res.Error != nil {
+	if res := client.db.Create(&image); res.Error != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"msg": "got some conflict", "err": res.Error})
 		return
 	} else {
 		c.JSON(http.StatusOK, gin.H{"imageId": image.ID})
+		return
+	}
+}
+
+func (client *ImageClient) GetImage(c *gin.Context) {
+	// Get a specified image
+	sensorId, err := uuid.Parse(c.Param("sensorId"))
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"msg": "bad uuid"})
+		return
+	}
+	imageIdString := c.Param("imageId")
+	var query *gorm.DB
+	if imageIdString == "latest" {
+		query = client.db.Where("sensor_id = ?", sensorId).Order("created_at desc")
+	} else {
+		imageId, err := uuid.Parse(imageIdString)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"msg": "bad uuid"})
+			return
+		}
+		query = client.db.Where("sensor_id = ?", sensorId).Where("image_id = ?", imageId)
+	}
+	var image Image
+	if res := query.First(&image); res.Error != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"msg": "something happened", "err": res.Error})
+		return
+	} else {
+		c.JSON(http.StatusOK, &image)
+		return
+	}
+}
+
+// clean up images that are older than the specified date
+func (client *ImageClient) TruncateImages(c *gin.Context) {
+	sensorId, err := uuid.Parse(c.Param("sensorId"))
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"msg": "bad uuid"})
+		return
+	}
+	oldest := c.Query("oldest")
+	if oldest == "" {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"msg": "you must specify an `oldest` date"})
+		return
+	}
+	t, err := time.Parse(time.RFC3339, oldest)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"msg": "RFC3339 time format required"})
+		return
+	}
+	query := client.db.Where("sensor_id = ?", sensorId).Where("created_at < ?", t)
+	if res := query.Delete(&[]Image{}); res.Error != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"msg": "something went wrong", "err": res.Error})
+		return
+	} else {
+		c.JSON(http.StatusOK, gin.H{"msg": "nice"})
 		return
 	}
 }
