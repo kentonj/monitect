@@ -26,6 +26,7 @@ func registerRoutes(
 	// image routes
 	router.POST("/sensors/:sensorId/images", imageClient.CreateImage)
 	router.GET("/sensors/:sensorId/images/:imageId", imageClient.GetImage)
+	router.GET("/sensors/:sensorId/images", imageClient.ListImages)
 	router.DELETE("/sensors/:sensorId/images", imageClient.TruncateImages)
 }
 

@@ -20,7 +20,7 @@ type ImageClient struct {
 
 type Image struct {
 	storage.Base
-	Bytes    []byte        `json:"bytes"`
+	Bytes    []byte        `json:"-"`
 	SensorID uuid.UUID     `json:"-"`
 	Sensor   sensor.Sensor `json:"-"`
 }
@@ -75,7 +75,7 @@ func (client *ImageClient) CreateImage(c *gin.Context) {
 }
 
 func (client *ImageClient) GetImage(c *gin.Context) {
-	// Get a specified image
+	// Get a specified image, return just the bytes
 	sensorId, err := uuid.Parse(c.Param("sensorId"))
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"msg": "bad uuid"})
@@ -98,7 +98,29 @@ func (client *ImageClient) GetImage(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"msg": "something happened", "err": res.Error})
 		return
 	} else {
-		c.JSON(http.StatusOK, &image)
+		c.Data(http.StatusOK, "image/png", image.Bytes)
+		return
+	}
+}
+
+type ListImagesResponse struct {
+	Images *[]Image
+	Count  int
+}
+
+func (client *ImageClient) ListImages(c *gin.Context) {
+	sensorId, err := uuid.Parse(c.Param("sensorId"))
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"msg": "bad uuid"})
+		return
+	}
+	query := client.db.Where("sensor_id = ?", sensorId).Order("created_at desc")
+	images := make([]Image, 0)
+	if res := query.Find(&images); res.Error != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"msg": "something went wrong", "details": res.Error})
+		return
+	} else {
+		c.JSON(http.StatusOK, ListImagesResponse{Images: &images, Count: len(images)})
 		return
 	}
 }
@@ -120,7 +142,7 @@ func (client *ImageClient) TruncateImages(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"msg": "RFC3339 time format required"})
 		return
 	}
-	query := client.db.Where("sensor_id = ?", sensorId).Where("created_at < ?", t)
+	query := client.db.Unscoped().Where("sensor_id = ?", sensorId).Where("created_at < ?", t)
 	if res := query.Delete(&[]Image{}); res.Error != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"msg": "something went wrong", "err": res.Error})
 		return
