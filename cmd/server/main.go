@@ -44,10 +44,10 @@ func NewImageCleaner(sensorClient *sensor.SensorClient, imageClient *image.Image
 	}
 }
 
-func (cleaner *ImageCleaner) Clean() {
+func (cleaner *ImageCleaner) Clean(interval time.Duration, lookback time.Duration) {
 	for {
-		time.Sleep(60 * time.Second)
-		oldest := time.Now().Add(-24 * time.Hour)
+		time.Sleep(interval)
+		oldest := time.Now().Add(-lookback)
 		log.Printf("deleting images older than %s", oldest)
 		cameras, err := cleaner.sensorClient.ListCameras()
 		if err != nil {
@@ -75,7 +75,7 @@ func main() {
 	imageClient := image.NewImageClient(db)
 
 	imageCleaner := NewImageCleaner(sensorClient, imageClient)
-	go imageCleaner.Clean()
+	go imageCleaner.Clean(1*time.Hour, 24*time.Hour)
 
 	registerRoutes(
 		router,
