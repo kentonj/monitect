@@ -125,29 +125,13 @@ func (client *ImageClient) ListImages(c *gin.Context) {
 	}
 }
 
-// clean up images that are older than the specified date
-func (client *ImageClient) TruncateImages(c *gin.Context) {
-	sensorId, err := uuid.Parse(c.Param("sensorId"))
-	if err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"msg": "bad uuid"})
-		return
-	}
-	oldest := c.Query("oldest")
-	if oldest == "" {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"msg": "you must specify an `oldest` date"})
-		return
-	}
-	t, err := time.Parse(time.RFC3339, oldest)
-	if err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"msg": "RFC3339 time format required"})
-		return
-	}
-	query := client.db.Unscoped().Where("sensor_id = ?", sensorId).Where("created_at < ?", t)
+// clean up images that are older than the specified date for all sensors of type 'camera'
+func (client *ImageClient) TruncateImages(sensorId uuid.UUID, oldest time.Time) error {
+	query := client.db.Unscoped().Where("sensor_id = ?", sensorId).Where("created_at < ?", oldest)
 	if res := query.Delete(&[]Image{}); res.Error != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"msg": "something went wrong", "err": res.Error})
-		return
+		log.Printf("deleted %d rows", res.RowsAffected)
+		return res.Error
 	} else {
-		c.JSON(http.StatusOK, gin.H{"msg": "nice"})
-		return
+		return nil
 	}
 }

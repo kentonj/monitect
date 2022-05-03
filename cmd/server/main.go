@@ -1,6 +1,9 @@
 package main
 
 import (
+	"log"
+	"time"
+
 	"github.com/gin-gonic/gin"
 	"github.com/kentonj/monitect/internal/conf"
 	"github.com/kentonj/monitect/internal/image"
@@ -27,7 +30,33 @@ func registerRoutes(
 	router.POST("/sensors/:sensorId/images", imageClient.CreateImage)
 	router.GET("/sensors/:sensorId/images/:imageId", imageClient.GetImage)
 	router.GET("/sensors/:sensorId/images", imageClient.ListImages)
-	router.DELETE("/sensors/:sensorId/images", imageClient.TruncateImages)
+}
+
+type ImageCleaner struct {
+	sensorClient *sensor.SensorClient
+	imageClient  *image.ImageClient
+}
+
+func NewImageCleaner(sensorClient *sensor.SensorClient, imageClient *image.ImageClient) *ImageCleaner {
+	return &ImageCleaner{
+		sensorClient: sensorClient,
+		imageClient:  imageClient,
+	}
+}
+
+func (cleaner *ImageCleaner) Clean() {
+	for {
+		time.Sleep(60 * time.Second)
+		oldest := time.Now().Add(-24 * time.Hour)
+		log.Printf("deleting images older than %s", oldest)
+		cameras, err := cleaner.sensorClient.ListCameras()
+		if err != nil {
+			log.Fatal(err)
+		}
+		for _, cam := range cameras {
+			cleaner.imageClient.TruncateImages(cam.ID, oldest)
+		}
+	}
 }
 
 func main() {
@@ -45,11 +74,15 @@ func main() {
 	sensorReadingClient := sensorreading.NewSensorReadingClient(db)
 	imageClient := image.NewImageClient(db)
 
+	imageCleaner := NewImageCleaner(sensorClient, imageClient)
+	go imageCleaner.Clean()
+
 	registerRoutes(
 		router,
 		sensorClient,
 		sensorReadingClient,
 		imageClient,
 	)
+
 	router.Run()
 }

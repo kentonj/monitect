@@ -134,6 +134,16 @@ type ListSensorsResponse struct {
 	Count   int      `json:"count"`
 }
 
+// list cameras
+func (client *SensorClient) ListCameras() ([]Sensor, error) {
+	cameras := make([]Sensor, 0)
+	if res := client.db.Where("type = ?", "camera").Find(&cameras); res.Error != nil {
+		return nil, res.Error
+	} else {
+		return cameras, nil
+	}
+}
+
 // list sensors
 func (client *SensorClient) ListSensors(c *gin.Context) {
 	sensors := make([]Sensor, 0)

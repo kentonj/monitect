@@ -30,8 +30,7 @@ def truncate_images():
 
 
 if __name__ == '__main__':
-    # # while True:
-    post_image()
+    while True:
+        post_image()
     # truncate_images()
     get_latest()
-
