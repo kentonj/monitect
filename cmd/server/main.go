@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -18,6 +19,8 @@ func registerRoutes(
 	sensorReadingClient *sensorreading.SensorReadingClient,
 	imageClient *image.ImageClient,
 ) {
+	// ping route
+	router.GET("/", func(c *gin.Context) { c.JSON(http.StatusAccepted, gin.H{"msg": "pong"}) })
 	// sensor routes
 	router.POST("/sensors", sensorClient.CreateSensor)
 	router.GET("/sensors/:sensorId", sensorClient.GetSensor)

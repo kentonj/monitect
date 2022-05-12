@@ -16,3 +16,5 @@
 
 # sqlite databases
 *.db
+
+**/package-lock.json
