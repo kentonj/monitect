@@ -2,9 +2,11 @@ package image
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -114,7 +116,18 @@ func (client *ImageClient) ListImages(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"msg": "bad uuid"})
 		return
 	}
-	query := client.db.Where("sensor_id = ?", sensorId).Order("created_at desc")
+	limitString := c.Query("limit")
+	var limit int
+	if limitString != "" {
+		limit, err = strconv.Atoi(limitString)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"msg": fmt.Sprint("invalid limit ", limitString)})
+			return
+		}
+	} else {
+		limit = 100
+	}
+	query := client.db.Where("sensor_id = ?", sensorId).Order("created_at desc").Limit(limit)
 	images := make([]Image, 0)
 	if res := query.Find(&images); res.Error != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"msg": "something went wrong", "details": res.Error})

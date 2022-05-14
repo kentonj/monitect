@@ -3,17 +3,15 @@ import requests
 import base64
 
 host = "http://localhost:8080"
-camera_id = "01dcfa54-e11f-48e7-9db3-95592de43b77"
-counter = 0
+camera_id = "a4f63af7-ce6e-4b8a-af05-419a80258fec"
 
-def post_image():
+
+def post_image(image_path: str):
     # post an image to the API
-    global counter
-    pic_number = counter % 2 + 1
     resp = requests.post(f"{host}/sensors/{camera_id}/images", files={
-        'image': open(f'pic{pic_number}.png', 'rb')
+        'image': open(image_path, 'rb')
     })
-    counter += 1
+    print(resp.status_code)
 
 
 def get_latest():
@@ -30,7 +28,4 @@ def truncate_images():
 
 
 if __name__ == '__main__':
-    while True:
-        post_image()
-    # truncate_images()
-    get_latest()
+    post_image('web/src/assets/logo.png')

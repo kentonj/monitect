@@ -101,6 +101,23 @@ func (client *SensorClient) GetSensor(c *gin.Context) {
 	}
 }
 
+// delete a sensor by it's id
+func (client *SensorClient) DeleteSensor(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("sensorId"))
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"err": "not a valid uuid"})
+		return
+	}
+	var sensor Sensor
+	if res := client.db.Delete(&sensor, id); res.Error != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"err": res.Error})
+		return
+	} else {
+		c.JSON(http.StatusOK, gin.H{"msg": "OK", "sensor": sensor})
+		return
+	}
+}
+
 type UpdateSensorBody struct {
 	Name string `json:"name"`
 	Type string `json:"type"`

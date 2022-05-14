@@ -1,10 +1,12 @@
 <template lang="pug">
 .container
-  .title {{ pongMessage }}
+  .title {{ title }}
   .columns
     .column
-      .box
-        .title {{ camera.name }}
+      Camera(v-for="camera in cameras"
+      :key="camera.id"
+      :camera="camera"
+      )
     .column
       Sensor(v-for="sensor in sensors"
       :key="sensor.id"
@@ -14,58 +16,38 @@
 
 <script>
 import Sensor from '@/components/Sensor.vue';
-
+import Camera from '@/components/Camera.vue';
 import axios from 'axios';
 
-function getPong() {
-  return axios.get('/api').then((response) => response.data);
-}
-
-function getCamera() {
-  // get the first camera we found
-  return axios.get('/api/sensors')
-    .then((response) => response.data.sensors.find((sensor) => sensor.type === 'camera'));
-}
-
 function getSensors() {
-  return axios.get('/api/sensors')
-    .then((response) => response.data.sensors.filter((sensor) => sensor.type !== 'camera'));
+  return axios.get('/api/sensors').then((response) => response.data.sensors);
 }
 
 export default {
   name: 'Dashboard',
   components: {
     Sensor,
+    Camera,
   },
   data() {
     return {
-      pongMessage: '',
+      title: 'monitect',
       sensors: [],
-      camera: {},
+      cameras: [],
     };
   },
   methods: {
-    setPong() {
-      getPong().then((data) => {
-        this.pongMessage = data.msg;
-      });
-    },
-    setCamera() {
-      getCamera().then((cam) => {
-        console.log('this is the camera');
-        console.log(cam);
-        this.camera = cam;
-      });
-    },
+    // get and set both cameras and sensors
     setSensors() {
       getSensors().then((sensors) => {
-        this.sensors = sensors;
+        const cameras = sensors.filter((sensor) => sensor.type === 'camera');
+        const nonCameras = sensors.filter((sensor) => sensor.type !== 'camera');
+        this.cameras = cameras;
+        this.sensors = nonCameras;
       });
     },
   },
   created() {
-    this.setPong();
-    this.setCamera();
     this.setSensors();
   },
 };

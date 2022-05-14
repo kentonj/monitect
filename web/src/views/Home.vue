@@ -1,6 +1,5 @@
 <template>
   <div class="home">
-    <img alt="Monitect Logo" src="../assets/logo.png">
     <Dashboard/>
   </div>
 </template>

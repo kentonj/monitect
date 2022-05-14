@@ -25,6 +25,7 @@ func registerRoutes(
 	router.POST("/sensors", sensorClient.CreateSensor)
 	router.GET("/sensors/:sensorId", sensorClient.GetSensor)
 	router.PUT("/sensors/:sensorId", sensorClient.UpdateSensor)
+	router.DELETE("/sensors/:sensorId", sensorClient.DeleteSensor)
 	router.GET("/sensors", sensorClient.ListSensors)
 	// sensor-readings routes
 	router.POST("/sensors/:sensorId/readings", sensorReadingClient.CreateSensorReading)
