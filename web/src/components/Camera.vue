@@ -34,9 +34,17 @@ export default {
         this.imageBase64 = imageBase64;
       });
     },
+    pollForImages() {
+      // fetch the initial image
+      this.setLatestImage();
+      // look for a new one regularly
+      setInterval(() => {
+        this.setLatestImage();
+      }, 3000);
+    },
   },
-  created() {
-    this.setLatestImage();
+  mounted() {
+    this.pollForImages();
   },
 };
 </script>

@@ -28,14 +28,22 @@ export default {
   },
   methods: {
     setSensorReadings() {
-      getSensorReadings(this.$props.sensor.id).then((sensorReadings) => {
+      getSensorReadings(this.$props.sensor.id, 10).then((sensorReadings) => {
         this.sensorReadings = sensorReadings;
         this.lastSensorReading = sensorReadings[sensorReadings.length - 1];
       });
     },
+    pollForSensorReadings() {
+      // fetch the initial sensor readings
+      this.setSensorReadings();
+      // look for a new set of sensor readings regularly
+      setInterval(() => {
+        this.setSensorReadings();
+      }, 10000);
+    },
   },
-  created() {
-    this.setSensorReadings();
+  mounted() {
+    this.pollForSensorReadings();
   },
 };
 </script>
