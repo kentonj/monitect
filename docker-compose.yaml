@@ -1,18 +1,30 @@
 version: "3.3"
 
 services:
-  server:
+  api:
     build:
       context: ./
-    restart: unless-stopped
-    command: ./server
-    environment:
-      PORT: 8181
-    ports:
-      - "8181:8181"
+      dockerfile: ./docker/api.Dockerfile
+    # restart: unless-stopped
+    command: "./configs/server.yaml"
     volumes:
-      - data:/go/monitect/data
-      - ./conf/:/go/monitect/conf/
+      - data:/data
+      - ./configs/:/configs/
+  web:
+    build:
+      context: ./
+      dockerfile: ./docker/web.Dockerfile
+    depends_on:
+      - api
+  nginx:
+    build:
+      context: ./
+      dockerfile: ./docker/nginx.Dockerfile
+    ports:
+      - "8080:80"
+    depends_on:
+      - web
+    restart: unless-stopped
   # dht22-1:
   #   build:
   #     context: ./sensors

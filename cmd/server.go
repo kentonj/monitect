@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -64,8 +65,10 @@ func (cleaner *ImageCleaner) Clean(interval time.Duration, lookback time.Duratio
 }
 
 func main() {
+	confPath := os.Args[1]
+	log.Printf("using config path %s", confPath)
 	// load config
-	config := conf.NewConfig("./configs/server.yaml")
+	config := conf.NewConfig(confPath)
 	// open the sqlite database, pass it to the models
 	db := storage.Connect(config)
 	// assign the db to the models so that it's accessible within the model classes
