@@ -6,6 +6,8 @@ services:
       context: ./
       dockerfile: ./docker/api.Dockerfile
     command: "./configs/server.yaml"
+    ports:
+      - "8080:8080"
     volumes:
       - data:/data
       - ./configs/:/configs/
@@ -15,7 +17,7 @@ services:
       context: ./
       dockerfile: ./docker/web.Dockerfile
     ports:
-      - "8080:80"
+      - "5000:80"
     depends_on:
       - api
     restart: unless-stopped

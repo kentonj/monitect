@@ -2,8 +2,8 @@ from datetime import datetime, timedelta, timezone
 import requests
 import base64
 
-host = "http://localhost:8080"
-camera_id = "a4f63af7-ce6e-4b8a-af05-419a80258fec"
+host = "http://localhost:8080/"
+camera_id = "fe3c89da-7ae5-417d-9a06-31cb73d66a42"
 
 
 def post_image(image_path: str):

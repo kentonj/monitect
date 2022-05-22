@@ -1,6 +1,6 @@
 <template lang="pug">
 .container
-  .title {{ title }}
+  .title.is-1 {{ title }}
   .columns
     .column
       Camera(v-for="camera in cameras"

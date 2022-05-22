@@ -22,6 +22,8 @@ type SensorClient struct {
 func NewSensorClient(db *gorm.DB) *SensorClient {
 	if err := db.AutoMigrate(&Sensor{}); err != nil {
 		log.Fatal("Could not automigrate the sensor object")
+	} else {
+		log.Println("Migrated sensors")
 	}
 	client := SensorClient{db: db}
 	return &client
@@ -31,6 +33,7 @@ type Sensor struct {
 	storage.Base
 	Name string `json:"name,omitempty"`
 	Type string `json:"type,omitempty"`
+	Unit string `json:"unit,omitempty"`
 }
 
 func (s *Sensor) Update(u *UpdateSensorBody) {
@@ -40,11 +43,15 @@ func (s *Sensor) Update(u *UpdateSensorBody) {
 	if u.Type != "" {
 		s.Type = u.Type
 	}
+	if u.Unit != "" {
+		s.Unit = u.Unit
+	}
 }
 
 type CreateSensorBody struct {
 	Name string `json:"name"`
 	Type string `json:"type"`
+	Unit string `json:"unit"`
 }
 
 // convert the sensor body to a sensor, doing any necessary logical checks
@@ -58,6 +65,7 @@ func (body *CreateSensorBody) toSensor() (*Sensor, error) {
 	sensor := Sensor{
 		Name: body.Name,
 		Type: body.Type,
+		Unit: body.Unit,
 	}
 	sensor.AssignUUID()
 	return &sensor, nil
@@ -121,6 +129,7 @@ func (client *SensorClient) DeleteSensor(c *gin.Context) {
 type UpdateSensorBody struct {
 	Name string `json:"name"`
 	Type string `json:"type"`
+	Unit string `json:"unit"`
 }
 
 func (client *SensorClient) UpdateSensor(c *gin.Context) {
