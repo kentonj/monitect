@@ -3,7 +3,7 @@
   .box
     .title.is-3 {{ sensor.name || '' }}
     .box
-      .title.is-2 {{ latestSensorReading.value }} ({{ sensor.unit || '' }})
+      .title.is-4 {{ latestSensorReading.value }} ({{ sensor.unit || '' }})
       .subtitle.is-6 {{ latestSensorReading.createdTime }}
 </template>
 
