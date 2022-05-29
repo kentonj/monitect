@@ -5,10 +5,11 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/gorilla/mux"
 	"gorm.io/gorm"
 
+	"github.com/kentonj/monitect/internal/common"
 	storage "github.com/kentonj/monitect/internal/storage"
 )
 
@@ -72,56 +73,56 @@ func (body *CreateSensorBody) toSensor() (*Sensor, error) {
 }
 
 // create a sensor from a createsensor body
-func (client *SensorClient) CreateSensor(c *gin.Context) {
+func (client *SensorClient) CreateSensor(w http.ResponseWriter, r *http.Request) {
 	var createSensorBody CreateSensorBody
-	if parseErr := c.ShouldBindJSON(&createSensorBody); parseErr != nil {
-		c.AbortWithStatus(http.StatusBadRequest)
+	if parseErr := common.BindJSON(r, &createSensorBody); parseErr != nil {
+		common.WriteBody(w, http.StatusBadRequest, common.AnyMap{"err": parseErr.Error()})
 		return
 	}
 	sensor, err := createSensorBody.toSensor()
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"err": err})
+		common.WriteBody(w, http.StatusBadRequest, common.AnyMap{"err": err.Error()})
 		return
 	}
 	if res := client.db.Create(sensor); res.Error != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"err": res.Error})
+		common.WriteBody(w, http.StatusInternalServerError, common.AnyMap{"err": res.Error.Error()})
 		return
 	} else {
-		c.JSON(http.StatusCreated, gin.H{"sensor": sensor})
+		common.WriteBody(w, http.StatusCreated, common.AnyMap{"sensor": sensor})
 		return
 	}
 }
 
 // get a sensor by it's ID
-func (client *SensorClient) GetSensor(c *gin.Context) {
-	id, err := uuid.Parse(c.Param("sensorId"))
+func (client *SensorClient) GetSensor(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(mux.Vars(r)["sensorId"])
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"err": "not a valid uuid"})
+		common.WriteBody(w, http.StatusBadRequest, common.AnyMap{"err": "not a valid uuid"})
 		return
 	}
 	var sensor Sensor
 	if res := client.db.First(&sensor, id); res.Error != nil {
-		c.AbortWithStatus(http.StatusNotFound)
+		common.WriteBody(w, http.StatusNotFound, nil)
 		return
 	} else {
-		c.JSON(http.StatusOK, gin.H{"msg": "OK", "sensor": sensor})
+		common.WriteBody(w, http.StatusOK, common.AnyMap{"msg": "OK", "sensor": sensor})
 		return
 	}
 }
 
 // delete a sensor by it's id
-func (client *SensorClient) DeleteSensor(c *gin.Context) {
-	id, err := uuid.Parse(c.Param("sensorId"))
+func (client *SensorClient) DeleteSensor(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(mux.Vars(r)["sensorId"])
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"err": "not a valid uuid"})
+		common.WriteBody(w, http.StatusBadRequest, common.AnyMap{"err": "not a valid uuid"})
 		return
 	}
 	var sensor Sensor
 	if res := client.db.Delete(&sensor, id); res.Error != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"err": res.Error})
+		common.WriteBody(w, http.StatusInternalServerError, common.AnyMap{"err": res.Error})
 		return
 	} else {
-		c.JSON(http.StatusOK, gin.H{"msg": "OK", "sensor": sensor})
+		common.WriteBody(w, http.StatusOK, common.AnyMap{"msg": "OK", "sensor": sensor})
 		return
 	}
 }
@@ -132,25 +133,26 @@ type UpdateSensorBody struct {
 	Unit string `json:"unit"`
 }
 
-func (client *SensorClient) UpdateSensor(c *gin.Context) {
-	id, err := uuid.Parse(c.Param("sensorId"))
+func (client *SensorClient) UpdateSensor(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(mux.Vars(r)["sensorId"])
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"err": "not a valid uuid"})
+		common.WriteBody(w, http.StatusBadRequest, common.AnyMap{"err": "not a valid uuid"})
 		return
 	}
 	var updateSensorBody UpdateSensorBody
-	if err := c.ShouldBindJSON(&updateSensorBody); err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"err": err})
+	if err := common.BindJSON(r, &updateSensorBody); err != nil {
+		common.WriteBody(w, http.StatusBadRequest, common.AnyMap{"err": err})
 		return
 	}
 	var sensor Sensor
 	if res := client.db.First(&sensor, id); res.Error != nil {
-		c.AbortWithStatus(http.StatusNotFound)
+		common.WriteBody(w, http.StatusNotFound, nil)
 		return
 	}
 	sensor.Update(&updateSensorBody)
 	if res := client.db.Save(&sensor); res.Error != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"err": res.Error})
+		common.WriteBody(w, http.StatusInternalServerError, common.AnyMap{"err": res.Error})
+		return
 	}
 }
 
@@ -171,13 +173,13 @@ func (client *SensorClient) ListCameras() ([]Sensor, error) {
 }
 
 // list sensors
-func (client *SensorClient) ListSensors(c *gin.Context) {
+func (client *SensorClient) ListSensors(w http.ResponseWriter, r *http.Request) {
 	sensors := make([]Sensor, 0)
 	if res := client.db.Find(&sensors); res.Error != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"err": res.Error})
+		common.WriteBody(w, http.StatusInternalServerError, common.AnyMap{"err": res.Error})
 		return
 	} else {
-		c.JSON(http.StatusOK, ListSensorsResponse{
+		common.WriteBody(w, http.StatusOK, ListSensorsResponse{
 			Msg:     "OK",
 			Sensors: sensors,
 			Count:   len(sensors),

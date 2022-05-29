@@ -6,4 +6,8 @@ type Config struct {
 		InitSQL string `yaml:"init_sql"`
 		Debug   bool   `yaml:"debug"`
 	} `yaml:"database"`
+	Server struct {
+		Port string `yaml:"port"`
+		Host string `yaml:"host"`
+	} `yaml:"server"`
 }

@@ -6,8 +6,9 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/gorilla/mux"
+	"github.com/kentonj/monitect/internal/common"
 	"github.com/kentonj/monitect/internal/sensor"
 	"github.com/kentonj/monitect/internal/storage"
 	"gorm.io/gorm"
@@ -40,28 +41,28 @@ type CreateSensorReadingResponse struct {
 	SensorReading *SensorReading `json:"sensorReading"`
 }
 
-func (client *SensorReadingClient) CreateSensorReading(c *gin.Context) {
-	sensorId, err := uuid.Parse(c.Param("sensorId"))
+func (client *SensorReadingClient) CreateSensorReading(w http.ResponseWriter, r *http.Request) {
+	sensorId, err := uuid.Parse(mux.Vars(r)["sensorId"])
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"err": "unable to parse uuid"})
+		common.WriteBody(w, http.StatusBadRequest, common.AnyMap{"err": "unable to parse uuid"})
 		return
 	}
 	var sensorReading SensorReading
-	if err := c.ShouldBindJSON(&sensorReading); err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"err": "bad json input"})
+	if err := common.BindJSON(r, &sensorReading); err != nil {
+		common.WriteBody(w, http.StatusBadRequest, common.AnyMap{"err": "bad json input"})
 		return
 	}
 	if sensorReading.Value == nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"msg": "sensor reading value cannot be nil"})
+		common.WriteBody(w, http.StatusBadRequest, common.AnyMap{"msg": "sensor reading value cannot be nil"})
 		return
 	}
 	sensorReading.SensorID = sensorId
 	sensorReading.AssignUUID()
 	if res := client.db.Create(&sensorReading); res.Error != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"msg": "whoops, something went wrong", "details": res.Error})
+		common.WriteBody(w, http.StatusInternalServerError, common.AnyMap{"msg": "whoops, something went wrong", "details": res.Error})
 		return
 	} else {
-		c.JSON(http.StatusOK, CreateSensorReadingResponse{SensorReading: &sensorReading})
+		common.WriteBody(w, http.StatusOK, CreateSensorReadingResponse{SensorReading: &sensorReading})
 		return
 	}
 }
@@ -71,19 +72,18 @@ type ListSensorReadingsResponse struct {
 	Count          int              `json:"count"`
 }
 
-func (client *SensorReadingClient) ListSensorReadings(c *gin.Context) {
-	// get readings between a date range with a configurable limit, will get the results in desc order
-	sensorId, err := uuid.Parse(c.Param("sensorId"))
+func (client *SensorReadingClient) ListSensorReadings(w http.ResponseWriter, r *http.Request) {
+	sensorId, err := uuid.Parse(mux.Vars(r)["sensorId"])
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"msg": "bad uuid"})
+		common.WriteBody(w, http.StatusBadRequest, common.AnyMap{"msg": "bad uuid"})
 		return
 	}
-	limitString := c.Query("limit")
+	limitString := r.URL.Query().Get("limit")
 	var limit int
 	if limitString != "" {
 		limit, err = strconv.Atoi(limitString)
 		if err != nil {
-			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"msg": fmt.Sprint("invalid limit ", limitString)})
+			common.WriteBody(w, http.StatusBadRequest, common.AnyMap{"msg": fmt.Sprint("invalid limit ", limitString)})
 			return
 		}
 	} else {
@@ -92,10 +92,10 @@ func (client *SensorReadingClient) ListSensorReadings(c *gin.Context) {
 	query := client.db.Where("sensor_id = ?", sensorId).Order("created_at desc").Limit(limit)
 	sensorReadings := make([]SensorReading, 0)
 	if res := query.Find(&sensorReadings); res.Error != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"msg": "something went wrong", "details": res.Error})
+		common.WriteBody(w, http.StatusInternalServerError, common.AnyMap{"msg": "something went wrong", "details": res.Error})
 		return
 	} else {
-		c.JSON(http.StatusOK, ListSensorReadingsResponse{SensorReadings: &sensorReadings, Count: len(sensorReadings)})
+		common.WriteBody(w, http.StatusOK, ListSensorReadingsResponse{SensorReadings: &sensorReadings, Count: len(sensorReadings)})
 		return
 	}
 }

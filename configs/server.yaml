@@ -4,3 +4,5 @@ database:
   init_sql: |
     PRAGMA foreign_keys = ON;
   debug: false
+server:
+  port: 8080

@@ -18,5 +18,8 @@ func NewConfig(configPath string) *Config {
 	if err != nil {
 		log.Fatalf("unable to unmarshal config file %s with error %v", configPath, err)
 	}
+	if config.Server.Host == "" {
+		config.Server.Host = "localhost"
+	}
 	return config
 }

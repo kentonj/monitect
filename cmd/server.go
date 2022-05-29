@@ -6,7 +6,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/gin-gonic/gin"
+	"github.com/gorilla/mux"
+	"github.com/kentonj/monitect/internal/common"
 	"github.com/kentonj/monitect/internal/conf"
 	"github.com/kentonj/monitect/internal/image"
 	"github.com/kentonj/monitect/internal/sensor"
@@ -15,26 +16,38 @@ import (
 )
 
 func registerRoutes(
-	router *gin.Engine,
+	router *mux.Router,
 	sensorClient *sensor.SensorClient,
 	sensorReadingClient *sensorreading.SensorReadingClient,
 	imageClient *image.ImageClient,
 ) {
 	// ping route
-	router.GET("/", func(c *gin.Context) { c.JSON(http.StatusAccepted, gin.H{"msg": "pong"}) })
+	router.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		common.WriteBody(w, http.StatusOK, map[string]string{"msg": "pong"})
+	}).Methods("GET")
 	// sensor routes
-	router.POST("/sensors", sensorClient.CreateSensor)
-	router.GET("/sensors/:sensorId", sensorClient.GetSensor)
-	router.PUT("/sensors/:sensorId", sensorClient.UpdateSensor)
-	router.DELETE("/sensors/:sensorId", sensorClient.DeleteSensor)
-	router.GET("/sensors", sensorClient.ListSensors)
+	router.HandleFunc("/sensors", sensorClient.CreateSensor).Methods("POST")
+	router.HandleFunc("/sensors/{sensorId}", sensorClient.GetSensor).Methods("GET")
+	router.HandleFunc("/sensors/{sensorId}", sensorClient.UpdateSensor).Methods("PUT")
+	router.HandleFunc("/sensors/{sensorId}", sensorClient.DeleteSensor).Methods("DELETE")
+	router.HandleFunc("/sensors", sensorClient.ListSensors).Methods("GET")
 	// sensor-readings routes
-	router.POST("/sensors/:sensorId/readings", sensorReadingClient.CreateSensorReading)
-	router.GET("/sensors/:sensorId/readings", sensorReadingClient.ListSensorReadings)
+	router.HandleFunc("/sensors/{sensorId}/readings", sensorReadingClient.CreateSensorReading).Methods("POST")
+	router.HandleFunc("/sensors/{sensorId}/readings", sensorReadingClient.ListSensorReadings).Methods("GET")
 	// image routes
-	router.POST("/sensors/:sensorId/images", imageClient.CreateImage)
-	router.GET("/sensors/:sensorId/images/:imageId", imageClient.GetImage)
-	router.GET("/sensors/:sensorId/images", imageClient.ListImages)
+	router.HandleFunc("/sensors/{sensorId}/images", imageClient.CreateImage).Methods("POST")
+	router.HandleFunc("/sensors/{sensorId}/images/:imageId", imageClient.GetImage).Methods("GET")
+	router.HandleFunc("/sensors/{sensorId}/images", imageClient.ListImages).Methods("GET")
+}
+
+func requestLogger(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// start a timer here
+		start := time.Now()
+		// Call the next handler, which can be another middleware in the chain, or the final handler.
+		next.ServeHTTP(w, r)
+		log.Printf("%s %s | %s", r.Method, r.RequestURI, time.Since(start))
+	})
 }
 
 type ImageCleaner struct {
@@ -76,7 +89,6 @@ func main() {
 		db = db.Debug()
 	}
 
-	router := gin.Default()
 	sensorClient := sensor.NewSensorClient(db)
 	sensorReadingClient := sensorreading.NewSensorReadingClient(db)
 	imageClient := image.NewImageClient(db)
@@ -84,12 +96,17 @@ func main() {
 	imageCleaner := NewImageCleaner(sensorClient, imageClient)
 	go imageCleaner.Clean(1*time.Hour, 24*time.Hour)
 
+	router := mux.NewRouter()
 	registerRoutes(
 		router,
 		sensorClient,
 		sensorReadingClient,
 		imageClient,
 	)
-
-	router.Run()
+	router.Use(requestLogger)
+	log.Println("registered all routes")
+	http.Handle("/", router)
+	hostPort := config.Server.Host + ":" + config.Server.Port
+	log.Println("serving @", hostPort)
+	http.ListenAndServe(hostPort, nil)
 }

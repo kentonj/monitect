@@ -9,8 +9,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/gorilla/mux"
+	"github.com/kentonj/monitect/internal/common"
 	"github.com/kentonj/monitect/internal/sensor"
 	"github.com/kentonj/monitect/internal/storage"
 	"gorm.io/gorm"
@@ -49,58 +50,59 @@ func NewImageClient(db *gorm.DB) *ImageClient {
 	}
 }
 
-func (client *ImageClient) CreateImage(c *gin.Context) {
-	sensorId, err := uuid.Parse(c.Param("sensorId"))
+func (client *ImageClient) CreateImage(w http.ResponseWriter, r *http.Request) {
+	sensorId, err := uuid.Parse(mux.Vars(r)["sensorId"])
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"msg": "bad sensorId"})
+		common.WriteBody(w, http.StatusBadRequest, common.AnyMap{"msg": "bad sensorId"})
 		return
 	}
-	file, _, err := c.Request.FormFile("image")
+	file, _, err := r.FormFile("image")
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"msg": "unable to read form data"})
+		common.WriteBody(w, http.StatusInternalServerError, common.AnyMap{"msg": "unable to read form data"})
 		return
 	}
 	defer file.Close()
 	buffer := bytes.NewBuffer(nil)
 	if _, err := io.Copy(buffer, file); err != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"msg": "unable to put file bytes on buffer"})
+		common.WriteBody(w, http.StatusInternalServerError, common.AnyMap{"msg": "unable to put file bytes on buffer"})
 		return
 	}
 	image := NewImage(sensorId, buffer.Bytes())
 	if res := client.db.Create(&image); res.Error != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"msg": "got some conflict", "err": res.Error})
+		common.WriteBody(w, http.StatusBadRequest, common.AnyMap{"msg": "got some conflict", "err": res.Error})
 		return
 	} else {
-		c.JSON(http.StatusOK, gin.H{"imageId": image.ID})
+		common.WriteBody(w, http.StatusOK, common.AnyMap{"imageId": image.ID})
 		return
 	}
 }
 
-func (client *ImageClient) GetImage(c *gin.Context) {
+func (client *ImageClient) GetImage(w http.ResponseWriter, r *http.Request) {
 	// Get a specified image, return just the bytes
-	sensorId, err := uuid.Parse(c.Param("sensorId"))
+	vars := mux.Vars(r)
+	sensorId, err := uuid.Parse(vars["sensorId"])
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"msg": "bad uuid"})
+		common.WriteBody(w, http.StatusBadRequest, common.AnyMap{"msg": "bad uuid"})
 		return
 	}
-	imageIdString := c.Param("imageId")
+	imageIdString := vars["imageId"]
 	var query *gorm.DB
 	if imageIdString == "latest" {
 		query = client.db.Where("sensor_id = ?", sensorId).Order("created_at desc")
 	} else {
 		imageId, err := uuid.Parse(imageIdString)
 		if err != nil {
-			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"msg": "bad uuid"})
+			common.WriteBody(w, http.StatusBadRequest, common.AnyMap{"msg": "bad uuid"})
 			return
 		}
 		query = client.db.Where("sensor_id = ?", sensorId).Where("image_id = ?", imageId)
 	}
 	var image Image
 	if res := query.First(&image); res.Error != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"msg": "something happened", "err": res.Error})
+		common.WriteBody(w, http.StatusInternalServerError, common.AnyMap{"msg": "something happened", "err": res.Error})
 		return
 	} else {
-		c.Data(http.StatusOK, "image/png", image.Bytes)
+		common.WriteData(w, http.StatusOK, "image/png", image.Bytes)
 		return
 	}
 }
@@ -110,18 +112,19 @@ type ListImagesResponse struct {
 	Count  int
 }
 
-func (client *ImageClient) ListImages(c *gin.Context) {
-	sensorId, err := uuid.Parse(c.Param("sensorId"))
+func (client *ImageClient) ListImages(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	sensorId, err := uuid.Parse(vars["sensorId"])
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"msg": "bad uuid"})
+		common.WriteBody(w, http.StatusBadRequest, common.AnyMap{"msg": "bad uuid"})
 		return
 	}
-	limitString := c.Query("limit")
+	limitString := vars["limit"]
 	var limit int
 	if limitString != "" {
 		limit, err = strconv.Atoi(limitString)
 		if err != nil {
-			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"msg": fmt.Sprint("invalid limit ", limitString)})
+			common.WriteBody(w, http.StatusBadRequest, common.AnyMap{"msg": fmt.Sprint("invalid limit ", limitString)})
 			return
 		}
 	} else {
@@ -130,10 +133,10 @@ func (client *ImageClient) ListImages(c *gin.Context) {
 	query := client.db.Where("sensor_id = ?", sensorId).Order("created_at desc").Limit(limit)
 	images := make([]Image, 0)
 	if res := query.Find(&images); res.Error != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"msg": "something went wrong", "details": res.Error})
+		common.WriteBody(w, http.StatusInternalServerError, common.AnyMap{"msg": "something went wrong", "details": res.Error})
 		return
 	} else {
-		c.JSON(http.StatusOK, ListImagesResponse{Images: &images, Count: len(images)})
+		common.WriteBody(w, http.StatusOK, ListImagesResponse{Images: &images, Count: len(images)})
 		return
 	}
 }
