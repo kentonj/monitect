@@ -2,32 +2,18 @@ package sensor
 
 import (
 	"errors"
+	"fmt"
 	"log"
-	"net/http"
 
 	"github.com/google/uuid"
-	"github.com/gorilla/mux"
-	"gorm.io/gorm"
-
-	"github.com/kentonj/monitect/internal/common"
 	storage "github.com/kentonj/monitect/internal/storage"
+	"github.com/kentonj/monitect/internal/stream"
+	"gorm.io/gorm"
 )
 
-// create a new sensor client
-// this should also automigrate the db object, and set up any necessary foreign keys
-// this should then be returned to any of the HTTP handlers, or RPC handlers, or anything like that
 type SensorClient struct {
-	db *gorm.DB
-}
-
-func NewSensorClient(db *gorm.DB) *SensorClient {
-	if err := db.AutoMigrate(&Sensor{}); err != nil {
-		log.Fatal("Could not automigrate the sensor object")
-	} else {
-		log.Println("Migrated sensors")
-	}
-	client := SensorClient{db: db}
-	return &client
+	db            *gorm.DB
+	StreamManager *stream.Manager
 }
 
 type Sensor struct {
@@ -37,7 +23,47 @@ type Sensor struct {
 	Unit string `json:"unit,omitempty"`
 }
 
-func (s *Sensor) Update(u *UpdateSensorBody) {
+type CreateSensorBody struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+	Unit string `json:"unit"`
+}
+
+type UpdateSensorBody struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+	Unit string `json:"unit"`
+}
+
+type ListSensorsResponse struct {
+	Msg     string   `json:"msg"`
+	Sensors []Sensor `json:"sensors"`
+	Count   int      `json:"count"`
+}
+
+func NewSensorClient(db *gorm.DB) *SensorClient {
+	if err := db.AutoMigrate(&Sensor{}); err != nil {
+		log.Fatal("Could not automigrate the sensor object")
+	} else {
+		log.Println("Migrated sensors")
+	}
+	streamManager := stream.NewManager(1000)
+	client := SensorClient{db: db, StreamManager: streamManager}
+	if sensors, err := client.ListSensors(); err != nil {
+		log.Fatalf("unable to list sensors: %s", err)
+	} else {
+		// add sensors to the stream manager
+		for _, sensor := range sensors {
+			log.Printf("adding sensor %s to stream manager", sensor.ID)
+			if err := client.StreamManager.Add(sensor.ID.String()); err != nil {
+				log.Fatalf("unable to add sensor %s to streamManager: %s", sensor.ID.String(), err)
+			}
+		}
+	}
+	return &client
+}
+
+func (s *Sensor) update(u *UpdateSensorBody) {
 	if u.Name != "" {
 		s.Name = u.Name
 	}
@@ -47,12 +73,6 @@ func (s *Sensor) Update(u *UpdateSensorBody) {
 	if u.Unit != "" {
 		s.Unit = u.Unit
 	}
-}
-
-type CreateSensorBody struct {
-	Name string `json:"name"`
-	Type string `json:"type"`
-	Unit string `json:"unit"`
 }
 
 // convert the sensor body to a sensor, doing any necessary logical checks
@@ -72,117 +92,106 @@ func (body *CreateSensorBody) toSensor() (*Sensor, error) {
 	return &sensor, nil
 }
 
-// create a sensor from a createsensor body
-func (client *SensorClient) CreateSensor(w http.ResponseWriter, r *http.Request) {
-	var createSensorBody CreateSensorBody
-	if parseErr := common.BindJSON(r, &createSensorBody); parseErr != nil {
-		common.WriteBody(w, http.StatusBadRequest, common.AnyMap{"err": parseErr.Error()})
-		return
-	}
+// CreateSensor creates a Sensor from the CreateSensorBody
+func (s *SensorClient) CreateSensor(createSensorBody *CreateSensorBody) (*Sensor, error) {
 	sensor, err := createSensorBody.toSensor()
 	if err != nil {
-		common.WriteBody(w, http.StatusBadRequest, common.AnyMap{"err": err.Error()})
-		return
+		return nil, err
 	}
-	if res := client.db.Create(sensor); res.Error != nil {
-		common.WriteBody(w, http.StatusInternalServerError, common.AnyMap{"err": res.Error.Error()})
-		return
-	} else {
-		common.WriteBody(w, http.StatusCreated, common.AnyMap{"sensor": sensor})
-		return
+	if res := s.db.Create(sensor); res.Error != nil {
+		return nil, res.Error
 	}
+	if err := s.StreamManager.Add(sensor.ID.String()); err != nil {
+		return nil, err
+	}
+	return sensor, nil
 }
 
-// get a sensor by it's ID
-func (client *SensorClient) GetSensor(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(mux.Vars(r)["sensorId"])
+// GetSensor retrieves a sensor by it's ID
+func (s *SensorClient) GetSensor(sensorId string) (*Sensor, error) {
+	sensorUUID, err := uuid.Parse(sensorId)
 	if err != nil {
-		common.WriteBody(w, http.StatusBadRequest, common.AnyMap{"err": "not a valid uuid"})
-		return
+		return nil, err
 	}
 	var sensor Sensor
-	if res := client.db.First(&sensor, id); res.Error != nil {
-		common.WriteBody(w, http.StatusNotFound, nil)
-		return
-	} else {
-		common.WriteBody(w, http.StatusOK, common.AnyMap{"msg": "OK", "sensor": sensor})
-		return
-	}
-}
-
-// delete a sensor by it's id
-func (client *SensorClient) DeleteSensor(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(mux.Vars(r)["sensorId"])
-	if err != nil {
-		common.WriteBody(w, http.StatusBadRequest, common.AnyMap{"err": "not a valid uuid"})
-		return
-	}
-	var sensor Sensor
-	if res := client.db.Delete(&sensor, id); res.Error != nil {
-		common.WriteBody(w, http.StatusInternalServerError, common.AnyMap{"err": res.Error})
-		return
-	} else {
-		common.WriteBody(w, http.StatusOK, common.AnyMap{"msg": "OK", "sensor": sensor})
-		return
-	}
-}
-
-type UpdateSensorBody struct {
-	Name string `json:"name"`
-	Type string `json:"type"`
-	Unit string `json:"unit"`
-}
-
-func (client *SensorClient) UpdateSensor(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(mux.Vars(r)["sensorId"])
-	if err != nil {
-		common.WriteBody(w, http.StatusBadRequest, common.AnyMap{"err": "not a valid uuid"})
-		return
-	}
-	var updateSensorBody UpdateSensorBody
-	if err := common.BindJSON(r, &updateSensorBody); err != nil {
-		common.WriteBody(w, http.StatusBadRequest, common.AnyMap{"err": err})
-		return
-	}
-	var sensor Sensor
-	if res := client.db.First(&sensor, id); res.Error != nil {
-		common.WriteBody(w, http.StatusNotFound, nil)
-		return
-	}
-	sensor.Update(&updateSensorBody)
-	if res := client.db.Save(&sensor); res.Error != nil {
-		common.WriteBody(w, http.StatusInternalServerError, common.AnyMap{"err": res.Error})
-		return
-	}
-}
-
-type ListSensorsResponse struct {
-	Msg     string   `json:"msg"`
-	Sensors []Sensor `json:"sensors"`
-	Count   int      `json:"count"`
-}
-
-// list cameras
-func (client *SensorClient) ListCameras() ([]Sensor, error) {
-	cameras := make([]Sensor, 0)
-	if res := client.db.Where("type = ?", "camera").Find(&cameras); res.Error != nil {
+	if res := s.db.First(&sensor, sensorUUID); res.Error != nil {
 		return nil, res.Error
 	} else {
-		return cameras, nil
+		return &sensor, nil
+	}
+}
+
+func (s *SensorClient) PublishSensorReading(sensorId string, data []byte) error {
+	sensorStream, found := s.StreamManager.Stream(sensorId)
+	if !found {
+		return fmt.Errorf("sensor stream for %s not found", sensorId)
+	}
+	sensorStream.Publish(data)
+	return nil
+}
+
+func (s *SensorClient) AddClientStream(sensorId string, clientId string) (chan []byte, error) {
+	sensorStream, found := s.StreamManager.Stream(sensorId)
+	if !found {
+		return nil, fmt.Errorf("stream for sensor not found")
+	}
+	if err := sensorStream.AddClient(clientId); err != nil {
+		return nil, err
+	}
+	if clientStream, found := sensorStream.Client(clientId); !found {
+		return nil, fmt.Errorf("client stream for sensor not found")
+	} else {
+		return clientStream, nil
+	}
+}
+
+func (s *SensorClient) RemoveClientStream(sensorId string, clientId string) {
+	log.Println("starting to remove client stream")
+	sensorStream, found := s.StreamManager.Stream(sensorId)
+	if !found {
+		log.Println("tried to remove a client stream that didn't exist")
+		return
+	}
+	sensorStream.RemoveClient(clientId)
+}
+
+// DeleteSensor deletes a sensor by its id
+func (s *SensorClient) DeleteSensor(sensorId string) error {
+	sensorUUID, err := uuid.Parse(sensorId)
+	if err != nil {
+		return err
+	}
+	var sensor Sensor
+	if res := s.db.Delete(&sensor, sensorUUID); res.Error != nil {
+		return res.Error
+	}
+	s.StreamManager.Remove(sensorId)
+	return nil
+}
+
+func (s *SensorClient) UpdateSensor(sensorId string, updateSensorBody *UpdateSensorBody) (*Sensor, error) {
+	sensorUUID, err := uuid.Parse(sensorId)
+	if err != nil {
+		return nil, err
+	}
+	var sensor Sensor
+	if res := s.db.First(&sensor, sensorUUID); res.Error != nil {
+		return nil, res.Error
+	}
+	sensor.update(updateSensorBody)
+	if res := s.db.Save(&sensor); res.Error != nil {
+		return nil, res.Error
+	} else {
+		return &sensor, nil
 	}
 }
 
 // list sensors
-func (client *SensorClient) ListSensors(w http.ResponseWriter, r *http.Request) {
-	sensors := make([]Sensor, 0)
-	if res := client.db.Find(&sensors); res.Error != nil {
-		common.WriteBody(w, http.StatusInternalServerError, common.AnyMap{"err": res.Error})
-		return
+func (s *SensorClient) ListSensors() ([]*Sensor, error) {
+	sensors := make([]*Sensor, 0)
+	if res := s.db.Find(&sensors); res.Error != nil {
+		return nil, res.Error
 	} else {
-		common.WriteBody(w, http.StatusOK, ListSensorsResponse{
-			Msg:     "OK",
-			Sensors: sensors,
-			Count:   len(sensors),
-		})
+		return sensors, nil
 	}
 }

@@ -1,7 +1,6 @@
 package storage
 
 import (
-	"log"
 	"time"
 
 	"github.com/google/uuid"
@@ -17,10 +16,5 @@ type Base struct {
 }
 
 func (b *Base) AssignUUID() {
-	// assign a UUID, throw an error if something goes wrong
-	if id, err := uuid.NewRandom(); err != nil {
-		log.Fatal("Couldn't generate a new UUID, wtf mate")
-	} else {
-		b.ID = id
-	}
+	b.ID = uuid.New()
 }

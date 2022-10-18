@@ -30,5 +30,8 @@ func Connect(config *conf.Config) *gorm.DB {
 			panic(err)
 		}
 	}
+	if config.Database.Debug {
+		db = db.Debug()
+	}
 	return db
 }
