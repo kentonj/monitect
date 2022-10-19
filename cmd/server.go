@@ -54,6 +54,7 @@ func (m *Monitect) registerRoutes() {
 
 func requestLogger(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("%s %s", r.Method, r.RequestURI)
 		start := time.Now()
 		// Call the next handler, which can be another middleware in the chain, or the final handler.
 		next.ServeHTTP(w, r)
@@ -142,23 +143,41 @@ func (m *Monitect) getSensorFeed(w http.ResponseWriter, r *http.Request) {
 		common.WriteBody(w, http.StatusNotFound, &ErrorResponse{Msg: "sensor not found " + sensorId})
 		return
 	}
-	// TODO: the client stream doesn't get removed if it disconnects without receiving any messages
-	defer m.SensorClient.RemoveClientStream(sensorId, clientId)
 	if ws, err := m.Upgrade(w, r, nil); err != nil {
 		common.WriteBody(w, http.StatusInternalServerError, &ErrorResponse{Msg: "unable to upgrade to websocket", Err: err})
 		return
 	} else {
-		// read from the stream, but only send data if the ticker has fired (i.e. rate limiting)
-		ticker := time.NewTicker(time.Second / 5)
-		for msg := range clientStream {
-			select {
-			case <-ticker.C:
-				if err := ws.WriteMessage(1, msg); err != nil {
-					return
+		go func() {
+			// read from the stream, but only send data if the ticker has fired (i.e. rate limiting)
+			ticker := time.NewTicker(time.Second)
+			defer func() {
+				m.SensorClient.RemoveClientStream(sensorId, clientId)
+				ticker.Stop()
+				ws.Close()
+			}()
+			for range ticker.C {
+				ws.SetWriteDeadline(time.Now().Add(10 * time.Second))
+				select {
+				case d, ok := <-clientStream:
+					if !ok {
+						ws.WriteMessage(websocket.CloseMessage, nil)
+						return
+					}
+					// skip to the latest message (if there is any)
+					newMessage := len(clientStream)
+					for i := 0; i < newMessage; i++ {
+						d = <-clientStream
+					}
+					if err := ws.WriteMessage(websocket.TextMessage, d); err != nil {
+						return
+					}
+				default:
+					if err := ws.WriteMessage(websocket.PingMessage, nil); err != nil {
+						return
+					}
 				}
-			default:
 			}
-		}
+		}()
 	}
 }
 
