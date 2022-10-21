@@ -1,31 +1,33 @@
-from datetime import datetime, timedelta, timezone
-import requests
+"""Send Images."""
+import time
+from typing import List
+import websockets
+import asyncio
 import base64
 
-host = "http://localhost:8080/"
-camera_id = "fe3c89da-7ae5-417d-9a06-31cb73d66a42"
+
+HOST = "localhost:8080"
+CAMERA_ID = "03017f18-da09-417e-8dc8-5d4109090b11"
 
 
-def post_image(image_path: str):
+async def post_image(websocket, image_path: str):
     # post an image to the API
-    resp = requests.post(f"{host}/sensors/{camera_id}/images", files={
-        'image': open(image_path, 'rb')
-    })
-    print(resp.status_code)
+    with open(image_path, 'rb') as f:
+        await websocket.send(base64.b64encode(f.read()))
 
 
-def get_latest():
-    resp = requests.get(f"{host}/sensors/{camera_id}/images/latest")
-    with open('latest_image.png', 'wb') as f:
-        f.write(resp.content)
+async def publish_image_frames(images: List[str]):
+    i = 0
+    addr = f"ws://{HOST}/sensors/{CAMERA_ID}/feed/publish"
+    async with websockets.connect(addr) as websocket:
+        while True:
+            if i == len(images):
+                i = 0
+            await post_image(websocket, images[i])
+            print(f'sent image: {images[i]}')
+            print(f'here is the address: {addr}')
+            i += 1
+            time.sleep(1/5)
 
-
-def truncate_images():
-    oldest = datetime.now(timezone.utc) - timedelta(seconds=30)
-    resp = requests.delete(f"{host}/sensors/{camera_id}/images", params={'oldest': oldest.isoformat()})
-    print(resp.status_code)
-    print(resp.json())
-
-
-if __name__ == '__main__':
-    post_image('web/src/assets/logo.png')
+images = ['pic0.png', 'pic1.png']
+asyncio.run(publish_image_frames(images))

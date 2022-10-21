@@ -18,3 +18,5 @@
 *.db
 
 **/package-lock.json
+.env
+__pycache__

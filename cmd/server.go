@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"html/template"
 	"log"
 	"net/http"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"github.com/kentonj/monitect/internal/conf"
 	"github.com/kentonj/monitect/internal/sensor"
 	"github.com/kentonj/monitect/internal/storage"
+	"github.com/kentonj/monitect/internal/stream"
 	"gorm.io/gorm"
 )
 
@@ -46,15 +48,18 @@ func (m *Monitect) registerRoutes() {
 	m.router.HandleFunc("/sensors", m.createSensor).Methods("POST")
 	m.router.HandleFunc("/sensors", m.listSensors).Methods("GET")
 	m.router.HandleFunc("/sensors/{sensorId}", m.getSensor).Methods("GET")
-	m.router.HandleFunc("/sensors/{sensorId}/feed", m.getSensorFeed).Methods("GET")
+	m.router.HandleFunc("/sensors/{sensorId}/feed/read", m.readSensorFeed).Methods("GET")
+	m.router.HandleFunc("/sensors/{sensorId}/feed/publish", m.publishSensorFeed).Methods("GET")
 	m.router.HandleFunc("/sensors/{sensorId}/reading", m.publishSensorReading).Methods("POST")
 	m.router.HandleFunc("/sensors/{sensorId}", m.updateSensor).Methods("PUT")
 	m.router.HandleFunc("/sensors/{sensorId}", m.deleteSensor).Methods("DELETE")
+	m.router.HandleFunc("/home", func(w http.ResponseWriter, r *http.Request) {
+		homeTemplate.Execute(w, "ws://localhost:8080/sensors/03017f18-da09-417e-8dc8-5d4109090b11/feed/read")
+	})
 }
 
 func requestLogger(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("%s %s", r.Method, r.RequestURI)
 		start := time.Now()
 		// Call the next handler, which can be another middleware in the chain, or the final handler.
 		next.ServeHTTP(w, r)
@@ -135,49 +140,90 @@ func (m *Monitect) deleteSensor(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (m *Monitect) getSensorFeed(w http.ResponseWriter, r *http.Request) {
+// publishToStreamFromWebsocket reads the websocket and sends data to the specified stream.Stream
+func (m *Monitect) publishToStreamFromWebsocket(ws *websocket.Conn, sensorStream *stream.Stream) {
+	defer func() {
+		ws.WriteMessage(websocket.CloseMessage, nil)
+		ws.Close()
+	}()
+	for {
+		ws.SetReadDeadline(time.Now().Add(10 * time.Second))
+		_, d, err := ws.ReadMessage()
+		if err != nil {
+			return
+		}
+		sensorStream.Publish(d)
+	}
+}
+
+// publishSensorFeed is used by a sensor to publish new readings
+func (m *Monitect) publishSensorFeed(w http.ResponseWriter, r *http.Request) {
 	sensorId := mux.Vars(r)["sensorId"]
-	clientId := r.URL.Query().Get("clientId")
-	clientStream, err := m.SensorClient.AddClientStream(sensorId, clientId)
-	if err != nil {
-		common.WriteBody(w, http.StatusNotFound, &ErrorResponse{Msg: "sensor not found " + sensorId})
+	sensorStream, found := m.SensorClient.GetSensorStream(sensorId)
+	if !found {
+		common.WriteBody(w, http.StatusNotFound, &ErrorResponse{Msg: "sensor stream not found " + sensorId})
 		return
 	}
 	if ws, err := m.Upgrade(w, r, nil); err != nil {
 		common.WriteBody(w, http.StatusInternalServerError, &ErrorResponse{Msg: "unable to upgrade to websocket", Err: err})
 		return
 	} else {
-		go func() {
-			// read from the stream, but only send data if the ticker has fired (i.e. rate limiting)
-			ticker := time.NewTicker(time.Second)
-			defer func() {
-				m.SensorClient.RemoveClientStream(sensorId, clientId)
-				ticker.Stop()
-				ws.Close()
-			}()
-			for range ticker.C {
-				ws.SetWriteDeadline(time.Now().Add(10 * time.Second))
-				select {
-				case d, ok := <-clientStream:
-					if !ok {
-						ws.WriteMessage(websocket.CloseMessage, nil)
-						return
-					}
-					// skip to the latest message (if there is any)
-					newMessage := len(clientStream)
-					for i := 0; i < newMessage; i++ {
-						d = <-clientStream
-					}
-					if err := ws.WriteMessage(websocket.TextMessage, d); err != nil {
-						return
-					}
-				default:
-					if err := ws.WriteMessage(websocket.PingMessage, nil); err != nil {
-						return
-					}
-				}
+		// hand off the processing to another thread so that we can complete this request
+		go m.publishToStreamFromWebsocket(ws, sensorStream)
+	}
+}
+
+func (m *Monitect) sendReadingsToWebsocket(ws *websocket.Conn, clientStream chan []byte, closeFunc func()) {
+	// read from the stream, but only send data if the ticker has fired (i.e. rate limiting)
+	ticker := time.NewTicker(m.streamRPS)
+	defer func() {
+		closeFunc()
+		ticker.Stop()
+		ws.WriteMessage(websocket.CloseMessage, nil)
+		ws.Close()
+	}()
+	for range ticker.C {
+		ws.SetWriteDeadline(time.Now().Add(10 * time.Second))
+		select {
+		case d, ok := <-clientStream:
+			if !ok {
+				log.Print("unable to receive on client stream")
+				return
 			}
-		}()
+			// skip to the latest message (if there is any)
+			newMessage := len(clientStream)
+			for i := 0; i < newMessage; i++ {
+				d = <-clientStream
+			}
+			if err := ws.WriteMessage(websocket.TextMessage, d); err != nil {
+				log.Printf("unable to write binary message to websocket : %s", err)
+				return
+			}
+		default:
+			if err := ws.WriteMessage(websocket.PingMessage, nil); err != nil {
+				log.Printf("unable to write ping message to websocket : %s", err)
+				return
+			}
+		}
+	}
+}
+
+func (m *Monitect) readSensorFeed(w http.ResponseWriter, r *http.Request) {
+	sensorId := mux.Vars(r)["sensorId"]
+	clientId := r.URL.Query().Get("clientId")
+	clientStream, err := m.SensorClient.AddClientStream(sensorId, clientId)
+	if err != nil {
+		log.Printf("unable to add a client stream: %s", err)
+		common.WriteBody(w, http.StatusNotFound, &ErrorResponse{Msg: "sensor not found " + sensorId})
+		return
+	}
+	if ws, err := m.Upgrade(w, r, nil); err != nil {
+		log.Printf("unable to upgrade the websocket client: %s", err)
+		common.WriteBody(w, http.StatusInternalServerError, &ErrorResponse{Msg: "unable to upgrade to websocket", Err: err})
+		return
+	} else {
+		// hand off the processing to another thread so that we can complete this request
+		go m.sendReadingsToWebsocket(ws, clientStream, func() { m.SensorClient.RemoveClientStream(sensorId, clientId) })
 	}
 }
 
@@ -213,3 +259,35 @@ func main() {
 	hostPort := config.Server.Host + ":" + config.Server.Port
 	server.Start(hostPort)
 }
+
+var homeTemplate = template.Must(template.New("").Parse(`
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<script>  
+window.addEventListener("load", function(evt) {
+	var image = document.getElementById("videofeed");
+	var updateImage = function(msg) {
+		image.src = 'data:image/png;base64, ' + msg.data;
+    };
+
+    var ws = new WebSocket("{{.}}");
+	ws.onmessage = (event) => {
+		updateImage(event);
+	};
+});
+</script>
+</head>
+<body>
+<table>
+<tr><td valign="top" width="50%">
+<p>Here is an image
+<p>
+</td><td valign="top" width="50%">
+<img id="videofeed">
+</img>
+</td></tr></table>
+</body>
+</html>
+`))

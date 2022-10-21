@@ -121,6 +121,11 @@ func (s *SensorClient) GetSensor(sensorId string) (*Sensor, error) {
 	}
 }
 
+// GetSensorStream gets the stream for the sensor
+func (s *SensorClient) GetSensorStream(sensorId string) (*stream.Stream, bool) {
+	return s.StreamManager.Stream(sensorId)
+}
+
 func (s *SensorClient) PublishSensorReading(sensorId string, data []byte) error {
 	sensorStream, found := s.StreamManager.Stream(sensorId)
 	if !found {
