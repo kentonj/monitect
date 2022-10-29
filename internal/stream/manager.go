@@ -1,35 +1,83 @@
 package stream
 
-import "fmt"
+import (
+	"fmt"
+	"log"
+	"sync"
+)
 
-// Manager is a named map of Stream pointers
+var (
+	CoreStreamName = "_CORE"
+)
+
+// Manager keeps a core stream and a collection of ClientStream
 type Manager struct {
-	streamSize int
-	streams    map[string]*Stream
+	streamSize    int
+	coreStream    *Stream
+	clientStreams map[string]*Stream
+	mu            sync.RWMutex
 }
 
-// NewManager creates and returns a pointer to a StreamManager
 func NewManager(streamSize int) *Manager {
-	return &Manager{streamSize: streamSize, streams: make(map[string]*Stream)}
+	m := Manager{
+		streamSize:    streamSize,
+		coreStream:    NewStream(CoreStreamName, streamSize),
+		clientStreams: make(map[string]*Stream),
+	}
+	// start fanning out
+	go m.fanout()
+	return &m
 }
 
-// Add creates and allocates named streams, so that they are ready for data to be published to them
-func (m *Manager) Add(streamId string) error {
-	if _, found := m.streams[streamId]; found {
-		return fmt.Errorf("stream with id %s already exists", streamId)
+// Fanout reads from the core stream, and distributes to all clients, until the core stream is closed
+func (m *Manager) fanout() {
+	for d := range m.coreStream.ch {
+		func() {
+			m.mu.RLock()
+			defer m.mu.RUnlock()
+			for _, clientStream := range m.clientStreams {
+				clientStream.Send(d)
+			}
+		}()
 	}
-	stream := NewStream(m.streamSize)
-	m.streams[streamId] = stream
+}
+
+// Send adds a message to the coreStream
+func (m *Manager) Send(d []byte) {
+	m.coreStream.Send(d)
+}
+
+// AddClient adds a client
+func (m *Manager) AddClient(clientId string) error {
+	if clientId == CoreStreamName {
+		return fmt.Errorf("cannot use core stream %s", CoreStreamName)
+	}
+	clientStream := NewStream(clientId, m.streamSize)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.clientStreams[clientId] = clientStream
+	log.Printf("added client %s", clientId)
 	return nil
 }
 
-// Remove removes the stream from the list of streams
-func (m *Manager) Remove(streamId string) {
-	delete(m.streams, streamId)
+// RemoveClient removes a client by closing the ClientStream.ch and removing it from the map of clientStreams
+func (m *Manager) RemoveClient(clientId string) error {
+	if clientId == CoreStreamName {
+		return fmt.Errorf("cannot remove core stream %s", CoreStreamName)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if clientStream, found := m.clientStreams[clientId]; found {
+		close(clientStream.ch)
+	}
+	delete(m.clientStreams, clientId)
+	return nil
 }
 
-// Stream returns the Stream associated with the specified streamId
-func (m *Manager) Stream(streamId string) (*Stream, bool) {
-	stream, found := m.streams[streamId]
-	return stream, found
+// ClientStream returns the ClientStream's channel for reading,
+func (m *Manager) ClientStream(clientId string) (*Stream, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	clientStream, found := m.clientStreams[clientId]
+	return clientStream, found
 }

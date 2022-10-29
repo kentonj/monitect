@@ -27,7 +27,7 @@ async def publish_image_frames(images: List[str]):
             print(f'sent image: {images[i]}')
             print(f'here is the address: {addr}')
             i += 1
-            time.sleep(1/5)
+            time.sleep(1/30)
 
-images = ['pic0.png', 'pic1.png']
+images = ['pic1.png', 'pic2.png']
 asyncio.run(publish_image_frames(images))

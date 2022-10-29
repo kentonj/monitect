@@ -19,6 +19,7 @@ func Connect(config *conf.Config) *gorm.DB {
 	if err != nil {
 		panic(err)
 	}
+	log.Printf("using database file %s", config.Database.File)
 	db, err := gorm.Open(sqlite.Open(config.Database.File), &gorm.Config{})
 	if err != nil {
 		panic(err)

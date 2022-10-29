@@ -1,78 +1,50 @@
 package stream
 
 import (
-	"fmt"
 	"log"
-	"sync"
 )
 
-// publishToStream publishes to the stream,
-// if the channel is full, it reads the last message (opening up a spot on the channel), then republishes
-func publishToStream(ch chan []byte, data []byte) {
-	select {
-	case ch <- data:
-	default:
-		<-ch
-		ch <- data
-	}
-}
-
+// Stream is meant to be assigned to a specific client, and contains an internal channel.
 type Stream struct {
-	size          int
-	baseStream    chan []byte
-	clientStreams map[string]chan []byte
-	mu            sync.RWMutex
+	clientId string
+	ch       chan []byte
 }
 
-func NewStream(streamSize int) *Stream {
-	baseStream := make(chan []byte, streamSize)
-	clientStreams := make(map[string]chan []byte)
-	return &Stream{
-		size:          streamSize,
-		baseStream:    baseStream,
-		clientStreams: clientStreams,
+// NewStream creates a Stream with a channel of specified size
+func NewStream(clientId string, size int) *Stream {
+	return &Stream{clientId: clientId, ch: make(chan []byte, size)}
+}
+
+// Send adds a message to the internal channel, if it's full, then drop the first message and add the new one
+func (s *Stream) Send(d []byte) {
+	select {
+	case s.ch <- d:
+	default:
+		log.Printf("client %s's channel is full, dropping oldest message", s.clientId)
+		<-s.ch
+		s.ch <- d
 	}
 }
 
-// Publish sends data to the base stream, and then fans out to all client streams
-func (s *Stream) Publish(data []byte) {
-	publishToStream(s.baseStream, data)
-	s.sendToClientStreams(data)
-}
-
-// sendToClientStreams sends the data to each of the client streams
-func (s *Stream) sendToClientStreams(data []byte) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for _, clientStream := range s.clientStreams {
-		publishToStream(clientStream, data)
+// Poll returns as many messages as are available on the internal channel, up to the limit provided
+// This may return an empty slice if no messages are available
+func (s *Stream) Poll(limit int) [][]byte {
+	msgs := make([][]byte, 0)
+	for {
+		if len(msgs) == limit {
+			return msgs
+		}
+		select {
+		case msg := <-s.ch:
+			msgs = append(msgs, msg)
+		default:
+			// no more available messages
+			return msgs
+		}
 	}
 }
 
-// AddClient adds a client to the specified stream
-func (s *Stream) AddClient(clientId string) error {
-	if _, found := s.clientStreams[clientId]; found {
-		return fmt.Errorf("client %s already exists", clientId)
-	}
-	clientStream := make(chan []byte, s.size)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.clientStreams[clientId] = clientStream
-	log.Printf("added client %s (total clients %d)", clientId, len(s.clientStreams))
-	return nil
-}
-
-// RemoveClient removes a client
-func (s *Stream) RemoveClient(clientId string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	close(s.clientStreams[clientId])
-	delete(s.clientStreams, clientId)
-	log.Printf("removed client %s (total clients %d)", clientId, len(s.clientStreams))
-}
-
-// Client returns the stream for the specified client
-func (s *Stream) Client(clientId string) (chan []byte, bool) {
-	stream, found := s.clientStreams[clientId]
-	return stream, found
+// C is a receive only channel that can be used to read from the internal channel directly
+func (s *Stream) C() <-chan []byte {
+	return s.ch
 }

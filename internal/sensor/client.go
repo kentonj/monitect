@@ -12,8 +12,8 @@ import (
 )
 
 type SensorClient struct {
-	db            *gorm.DB
-	StreamManager *stream.Manager
+	db                   *gorm.DB
+	sensorStreamManagers map[string]*stream.Manager
 }
 
 type Sensor struct {
@@ -47,17 +47,14 @@ func NewSensorClient(db *gorm.DB) *SensorClient {
 	} else {
 		log.Println("Migrated sensors")
 	}
-	streamManager := stream.NewManager(1000)
-	client := SensorClient{db: db, StreamManager: streamManager}
+	client := SensorClient{db: db, sensorStreamManagers: make(map[string]*stream.Manager)}
 	if sensors, err := client.ListSensors(); err != nil {
 		log.Fatalf("unable to list sensors: %s", err)
 	} else {
-		// add sensors to the stream manager
+		// add a stream manager for each sensor
 		for _, sensor := range sensors {
-			log.Printf("adding sensor %s to stream manager", sensor.ID)
-			if err := client.StreamManager.Add(sensor.ID.String()); err != nil {
-				log.Fatalf("unable to add sensor %s to streamManager: %s", sensor.ID.String(), err)
-			}
+			log.Printf("adding stream manager for sensor %s", sensor.ID)
+			client.sensorStreamManagers[sensor.ID.String()] = stream.NewManager(100)
 		}
 	}
 	return &client
@@ -101,9 +98,8 @@ func (s *SensorClient) CreateSensor(createSensorBody *CreateSensorBody) (*Sensor
 	if res := s.db.Create(sensor); res.Error != nil {
 		return nil, res.Error
 	}
-	if err := s.StreamManager.Add(sensor.ID.String()); err != nil {
-		return nil, err
-	}
+	// assign a stream.Manager for the new sensor
+	s.sensorStreamManagers[sensor.ID.String()] = stream.NewManager(1000)
 	return sensor, nil
 }
 
@@ -121,29 +117,32 @@ func (s *SensorClient) GetSensor(sensorId string) (*Sensor, error) {
 	}
 }
 
-// GetSensorStream gets the stream for the sensor
-func (s *SensorClient) GetSensorStream(sensorId string) (*stream.Stream, bool) {
-	return s.StreamManager.Stream(sensorId)
+// GetSensorStreamManager gets the stream.Manager for the sensor
+func (s *SensorClient) GetSensorStreamManager(sensorId string) (*stream.Manager, bool) {
+	streamManager, found := s.sensorStreamManagers[sensorId]
+	return streamManager, found
 }
 
+// PublishSensorReading sends a message to the sensor's streamManager
 func (s *SensorClient) PublishSensorReading(sensorId string, data []byte) error {
-	sensorStream, found := s.StreamManager.Stream(sensorId)
+	streamManager, found := s.GetSensorStreamManager(sensorId)
 	if !found {
-		return fmt.Errorf("sensor stream for %s not found", sensorId)
+		return fmt.Errorf("sensor stream.Manager for %s not found", sensorId)
 	}
-	sensorStream.Publish(data)
+	streamManager.Send(data)
 	return nil
 }
 
-func (s *SensorClient) AddClientStream(sensorId string, clientId string) (chan []byte, error) {
-	sensorStream, found := s.StreamManager.Stream(sensorId)
+// Add a client to the sensor, and return the client stream
+func (s *SensorClient) AddClientStream(sensorId string, clientId string) (*stream.Stream, error) {
+	streamManager, found := s.GetSensorStreamManager(sensorId)
 	if !found {
 		return nil, fmt.Errorf("stream for sensor not found")
 	}
-	if err := sensorStream.AddClient(clientId); err != nil {
+	if err := streamManager.AddClient(clientId); err != nil {
 		return nil, err
 	}
-	if clientStream, found := sensorStream.Client(clientId); !found {
+	if clientStream, found := streamManager.ClientStream(clientId); !found {
 		return nil, fmt.Errorf("client stream for sensor not found")
 	} else {
 		return clientStream, nil
@@ -151,8 +150,7 @@ func (s *SensorClient) AddClientStream(sensorId string, clientId string) (chan [
 }
 
 func (s *SensorClient) RemoveClientStream(sensorId string, clientId string) {
-	log.Println("starting to remove client stream")
-	sensorStream, found := s.StreamManager.Stream(sensorId)
+	sensorStream, found := s.GetSensorStreamManager(sensorId)
 	if !found {
 		log.Println("tried to remove a client stream that didn't exist")
 		return
@@ -170,7 +168,7 @@ func (s *SensorClient) DeleteSensor(sensorId string) error {
 	if res := s.db.Delete(&sensor, sensorUUID); res.Error != nil {
 		return res.Error
 	}
-	s.StreamManager.Remove(sensorId)
+	delete(s.sensorStreamManagers, sensor.ID.String())
 	return nil
 }
 

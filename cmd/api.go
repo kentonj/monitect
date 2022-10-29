@@ -19,7 +19,7 @@ import (
 )
 
 type Monitect struct {
-	websocket.Upgrader
+	upgrader     websocket.Upgrader
 	router       *mux.Router
 	streamRPS    time.Duration
 	SensorClient *sensor.SensorClient
@@ -53,9 +53,6 @@ func (m *Monitect) registerRoutes() {
 	m.router.HandleFunc("/sensors/{sensorId}/reading", m.publishSensorReading).Methods("POST")
 	m.router.HandleFunc("/sensors/{sensorId}", m.updateSensor).Methods("PUT")
 	m.router.HandleFunc("/sensors/{sensorId}", m.deleteSensor).Methods("DELETE")
-	m.router.HandleFunc("/home", func(w http.ResponseWriter, r *http.Request) {
-		homeTemplate.Execute(w, "ws://localhost:8080/sensors/03017f18-da09-417e-8dc8-5d4109090b11/feed/read")
-	})
 }
 
 func requestLogger(next http.Handler) http.Handler {
@@ -73,7 +70,7 @@ func NewMonitect(db *gorm.DB) *Monitect {
 	// list all sensors, and add them to the stream client
 	streamRPS := time.Second / 30
 	return &Monitect{
-		Upgrader:     websocket.Upgrader{},
+		upgrader:     websocket.Upgrader{},
 		router:       router,
 		streamRPS:    streamRPS,
 		SensorClient: sensorClient,
@@ -141,7 +138,7 @@ func (m *Monitect) deleteSensor(w http.ResponseWriter, r *http.Request) {
 }
 
 // publishToStreamFromWebsocket reads the websocket and sends data to the specified stream.Stream
-func (m *Monitect) publishToStreamFromWebsocket(ws *websocket.Conn, sensorStream *stream.Stream) {
+func (m *Monitect) publishToStreamFromWebsocket(ws *websocket.Conn, sensorStream *stream.Manager) {
 	defer func() {
 		ws.WriteMessage(websocket.CloseMessage, nil)
 		ws.Close()
@@ -152,19 +149,21 @@ func (m *Monitect) publishToStreamFromWebsocket(ws *websocket.Conn, sensorStream
 		if err != nil {
 			return
 		}
-		sensorStream.Publish(d)
+		sensorStream.Send(d)
 	}
 }
 
 // publishSensorFeed is used by a sensor to publish new readings
 func (m *Monitect) publishSensorFeed(w http.ResponseWriter, r *http.Request) {
 	sensorId := mux.Vars(r)["sensorId"]
-	sensorStream, found := m.SensorClient.GetSensorStream(sensorId)
+	sensorStream, found := m.SensorClient.GetSensorStreamManager(sensorId)
 	if !found {
 		common.WriteBody(w, http.StatusNotFound, &ErrorResponse{Msg: "sensor stream not found " + sensorId})
 		return
 	}
-	if ws, err := m.Upgrade(w, r, nil); err != nil {
+	// effectively allows cross host
+	m.upgrader.CheckOrigin = func(r *http.Request) bool { return true }
+	if ws, err := m.upgrader.Upgrade(w, r, nil); err != nil {
 		common.WriteBody(w, http.StatusInternalServerError, &ErrorResponse{Msg: "unable to upgrade to websocket", Err: err})
 		return
 	} else {
@@ -173,33 +172,25 @@ func (m *Monitect) publishSensorFeed(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (m *Monitect) sendReadingsToWebsocket(ws *websocket.Conn, clientStream chan []byte, closeFunc func()) {
-	// read from the stream, but only send data if the ticker has fired (i.e. rate limiting)
-	ticker := time.NewTicker(m.streamRPS)
+// sendReadingsToWebsocket sends messages received on the stream.Stream to the websocket
+func (m *Monitect) sendReadingsToWebsocket(ws *websocket.Conn, clientStream *stream.Stream, closeFunc func()) {
+	pingTicker := time.NewTicker(2 * time.Second)
 	defer func() {
 		closeFunc()
-		ticker.Stop()
+		pingTicker.Stop()
 		ws.WriteMessage(websocket.CloseMessage, nil)
 		ws.Close()
 	}()
-	for range ticker.C {
-		ws.SetWriteDeadline(time.Now().Add(10 * time.Second))
+	for {
 		select {
-		case d, ok := <-clientStream:
-			if !ok {
-				log.Print("unable to receive on client stream")
+		case data := <-clientStream.C():
+			ws.SetWriteDeadline(time.Now().Add(5 * time.Second))
+			if err := ws.WriteMessage(websocket.TextMessage, data); err != nil {
+				log.Printf("unable to write text message to websocket : %s", err)
 				return
 			}
-			// skip to the latest message (if there is any)
-			newMessage := len(clientStream)
-			for i := 0; i < newMessage; i++ {
-				d = <-clientStream
-			}
-			if err := ws.WriteMessage(websocket.TextMessage, d); err != nil {
-				log.Printf("unable to write binary message to websocket : %s", err)
-				return
-			}
-		default:
+		case <-pingTicker.C:
+			ws.SetWriteDeadline(time.Now().Add(5 * time.Second))
 			if err := ws.WriteMessage(websocket.PingMessage, nil); err != nil {
 				log.Printf("unable to write ping message to websocket : %s", err)
 				return
@@ -217,12 +208,14 @@ func (m *Monitect) readSensorFeed(w http.ResponseWriter, r *http.Request) {
 		common.WriteBody(w, http.StatusNotFound, &ErrorResponse{Msg: "sensor not found " + sensorId})
 		return
 	}
-	if ws, err := m.Upgrade(w, r, nil); err != nil {
+	m.upgrader.CheckOrigin = func(r *http.Request) bool { return true }
+	if ws, err := m.upgrader.Upgrade(w, r, nil); err != nil {
 		log.Printf("unable to upgrade the websocket client: %s", err)
 		common.WriteBody(w, http.StatusInternalServerError, &ErrorResponse{Msg: "unable to upgrade to websocket", Err: err})
 		return
 	} else {
 		// hand off the processing to another thread so that we can complete this request
+		log.Printf("starting goroutine for sendReadingsToWebsocket")
 		go m.sendReadingsToWebsocket(ws, clientStream, func() { m.SensorClient.RemoveClientStream(sensorId, clientId) })
 	}
 }

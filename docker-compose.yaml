@@ -5,11 +5,11 @@ services:
     build:
       context: ./
       dockerfile: ./docker/api.Dockerfile
-    command: "./configs/server.yaml"
+    command: "./configs/api.yaml"
     ports:
       - "8080:8080"
     volumes:
-      - data:/data
+      - ./data/:/data/
       - ./configs/:/configs/
     restart: unless-stopped
   web:
