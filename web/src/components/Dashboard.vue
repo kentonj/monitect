@@ -17,11 +17,7 @@
 <script>
 import Sensor from '@/components/Sensor.vue';
 import Camera from '@/components/Camera.vue';
-import axios from 'axios';
-
-function getSensors() {
-  return axios.get('/api/sensors').then((response) => response.data.sensors);
-}
+import apiClient from '@/apiClient';
 
 export default {
   name: 'Dashboard',
@@ -39,7 +35,7 @@ export default {
   methods: {
     // get and set both cameras and sensors
     setSensors() {
-      getSensors().then((sensors) => {
+      apiClient.getSensors().then((sensors) => {
         const cameras = sensors.filter((sensor) => sensor.type === 'camera');
         const nonCameras = sensors.filter((sensor) => sensor.type !== 'camera');
         this.cameras = cameras;

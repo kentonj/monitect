@@ -48,11 +48,12 @@ func (m *Monitect) registerRoutes() {
 	m.router.HandleFunc("/sensors", m.createSensor).Methods("POST")
 	m.router.HandleFunc("/sensors", m.listSensors).Methods("GET")
 	m.router.HandleFunc("/sensors/{sensorId}", m.getSensor).Methods("GET")
-	m.router.HandleFunc("/sensors/{sensorId}/feed/read", m.readSensorFeed).Methods("GET")
-	m.router.HandleFunc("/sensors/{sensorId}/feed/publish", m.publishSensorFeed).Methods("GET")
 	m.router.HandleFunc("/sensors/{sensorId}/reading", m.publishSensorReading).Methods("POST")
 	m.router.HandleFunc("/sensors/{sensorId}", m.updateSensor).Methods("PUT")
 	m.router.HandleFunc("/sensors/{sensorId}", m.deleteSensor).Methods("DELETE")
+	// websocket routes
+	m.router.HandleFunc("/sensors/{sensorId}/read", m.readSensorFeed).Methods("GET")
+	m.router.HandleFunc("/sensors/{sensorId}/publish", m.publishSensorFeed).Methods("GET")
 }
 
 func requestLogger(next http.Handler) http.Handler {

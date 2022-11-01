@@ -7,6 +7,8 @@
 </template>
 
 <script>
+import apiClient from '@/apiClient';
+
 export default {
   name: 'Camera',
   props: {
@@ -20,9 +22,8 @@ export default {
   },
   created() {
     console.log('Starting connection to WebSocket Server');
-    this.connection = new WebSocket(`ws://localhost:8080/sensors/${this.$props.camera.id}/feed/read?client=frontend`);
-    this.connection.onopen = function (event) {
-      console.log(event);
+    this.connection = apiClient.readSensorSocket(this.$props.camera.id, 'monitect-ui');
+    this.connection.onopen = function () {
       console.log('Successfully connected to the websocket server...');
     };
   },
