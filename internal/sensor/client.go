@@ -1,9 +1,11 @@
 package sensor
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/google/uuid"
 	storage "github.com/kentonj/monitect/internal/storage"
@@ -12,27 +14,53 @@ import (
 )
 
 type SensorClient struct {
-	db                   *gorm.DB
-	sensorStreamManagers map[string]*stream.Manager
+	db      *gorm.DB
+	sensors map[string]*Sensor // sensors are always cached. When a client requests a sensorId, it should be retrieved from this cache
 }
+
+type SensorType string
+
+type SensorReadingType string
+
+const (
+	sensorReadingMonitorName = "_SENSOR_READING_MONITOR"
+)
+
+var (
+	// sensor types
+	ThermometerType = SensorType("thermometer")
+	CameraType      = SensorType("camera")
+	GenericType     = SensorType("generic") // generic type
+	// reading types
+	Base64Type    = SensorReadingType("base64")
+	FloatType     = SensorReadingType("float64")
+	InterfaceType = SensorReadingType("interface")
+)
 
 type Sensor struct {
 	storage.Base
-	Name string `json:"name,omitempty"`
-	Type string `json:"type,omitempty"`
-	Unit string `json:"unit,omitempty"`
+	Name          string            `json:"name,omitempty"`
+	Type          SensorType        `json:"type,omitempty"`
+	ReadingType   SensorReadingType `json:"readingType,omitempty"`
+	Unit          string            `json:"unit,omitempty"`
+	StreamManager *stream.Manager   `json:"-" gorm:"-"` // don't include the stream in database operations or json
+}
+
+type SensorReading struct {
+	storage.Base
+	Value interface{} `json:"value"`
 }
 
 type CreateSensorBody struct {
-	Name string `json:"name"`
-	Type string `json:"type"`
-	Unit string `json:"unit"`
+	Name string     `json:"name"`
+	Type SensorType `json:"type"`
+	Unit string     `json:"unit"`
 }
 
 type UpdateSensorBody struct {
-	Name string `json:"name"`
-	Type string `json:"type"`
-	Unit string `json:"unit"`
+	Name string     `json:"name"`
+	Type SensorType `json:"type"`
+	Unit string     `json:"unit"`
 }
 
 type ListSensorsResponse struct {
@@ -42,22 +70,117 @@ type ListSensorsResponse struct {
 }
 
 func NewSensorClient(db *gorm.DB) *SensorClient {
-	if err := db.AutoMigrate(&Sensor{}); err != nil {
+	if err := db.AutoMigrate(&Sensor{}, &SensorReading{}); err != nil {
 		log.Fatal("Could not automigrate the sensor object")
 	} else {
 		log.Println("Migrated sensors")
 	}
-	client := SensorClient{db: db, sensorStreamManagers: make(map[string]*stream.Manager)}
-	if sensors, err := client.ListSensors(); err != nil {
+	client := SensorClient{db: db, sensors: make(map[string]*Sensor)}
+	if sensors, err := client.listSensorsFromDb(); err != nil {
 		log.Fatalf("unable to list sensors: %s", err)
 	} else {
-		// add a stream manager for each sensor
+		// add the stream manager for each sensor
 		for _, sensor := range sensors {
-			log.Printf("adding stream manager for sensor %s", sensor.ID)
-			client.sensorStreamManagers[sensor.ID.String()] = stream.NewManager(100)
+			sensor.StreamManager = stream.NewManager(100)
+			client.addSensorToCache(sensor)
+			go client.monitorReadings(sensor, 10*time.Second)
 		}
 	}
 	return &client
+}
+
+func parseSensorReadingValue(data []byte, readingType SensorReadingType) (interface{}, error) {
+	switch readingType {
+	case Base64Type:
+		var s string
+		if err := json.Unmarshal(data, &s); err != nil {
+			return nil, err
+		} else {
+			return s, nil
+		}
+	case FloatType:
+		var f float64
+		if err := json.Unmarshal(data, &f); err != nil {
+			return nil, err
+		} else {
+			return f, nil
+		}
+	default:
+		var i interface{}
+		if err := json.Unmarshal(data, &i); err != nil {
+			return nil, err
+		} else {
+			return i, nil
+		}
+	}
+}
+
+func NewSensorReading(data []byte, readingType SensorReadingType) (*SensorReading, error) {
+	v, err := parseSensorReadingValue(data, readingType)
+	if err != nil {
+		return nil, err
+	}
+	sr := SensorReading{Value: v}
+	sr.AssignUUID()
+	return &sr, nil
+}
+
+func (s *Sensor) readingType() SensorReadingType {
+	switch s.Type {
+	case ThermometerType:
+		return FloatType
+	case CameraType:
+		return Base64Type
+	default:
+		// we don't know the type, so just call it an interface
+		return InterfaceType
+	}
+}
+
+func (s *SensorClient) addSensorToCache(sensor *Sensor) {
+	s.sensors[sensor.ID.String()] = sensor
+}
+
+// monitorReadings periodically writes the reading to the database
+func (s *SensorClient) monitorReadings(sensor *Sensor, interval time.Duration) {
+	if err := sensor.StreamManager.AddClient(sensorReadingMonitorName); err != nil {
+		log.Fatalf("unable to add sensor reading monitor %s", err)
+		return
+	}
+	monitorStream, _ := sensor.StreamManager.ClientStream(sensorReadingMonitorName)
+	dataCh := monitorStream.C()
+	readingType := sensor.readingType()
+	ticker := time.NewTicker(interval)
+	for range ticker.C {
+		select {
+		case message := <-dataCh:
+			// see if there is more to consume on the ch
+			remainingMessages := len(dataCh)
+			data := message
+			for i := 0; i < remainingMessages; i++ {
+				data = <-dataCh
+			}
+			newReading, err := NewSensorReading(data, readingType)
+			if err != nil {
+				log.Fatalf("unable to create a new sensor reading: %s", err)
+			}
+			// overwrite the existing reading, or create a new reading
+			var existingReading SensorReading
+			if res := s.db.Order("createdAt desc").Take(&existingReading); res.Error != nil {
+				if res := s.db.Create(newReading); res.Error != nil {
+					log.Fatalf("unable to create a new reading: %s", res.Error)
+				}
+			} else {
+				existingReading.Value = newReading.Value
+				if res := s.db.Save(&existingReading); res.Error != nil {
+					log.Fatalf("unable to update the sensor reading reading: %s", res.Error)
+				}
+			}
+		default:
+			// do nothing
+			log.Printf("no new readings on the %s stream", sensorReadingMonitorName)
+		}
+	}
 }
 
 func (s *Sensor) update(u *UpdateSensorBody) {
@@ -89,7 +212,7 @@ func (body *CreateSensorBody) toSensor() (*Sensor, error) {
 	return &sensor, nil
 }
 
-// CreateSensor creates a Sensor from the CreateSensorBody
+// CreateSensor creates a Sensor from the CreateSensorBody and adds it to the sensor cache and database
 func (s *SensorClient) CreateSensor(createSensorBody *CreateSensorBody) (*Sensor, error) {
 	sensor, err := createSensorBody.toSensor()
 	if err != nil {
@@ -99,63 +222,51 @@ func (s *SensorClient) CreateSensor(createSensorBody *CreateSensorBody) (*Sensor
 		return nil, res.Error
 	}
 	// assign a stream.Manager for the new sensor
-	s.sensorStreamManagers[sensor.ID.String()] = stream.NewManager(1000)
+	sensor.StreamManager = stream.NewManager(1000)
+	s.sensors[sensor.ID.String()] = sensor
+	go s.monitorReadings(sensor, 10*time.Second)
 	return sensor, nil
 }
 
-// GetSensor retrieves a sensor by it's ID
-func (s *SensorClient) GetSensor(sensorId string) (*Sensor, error) {
-	sensorUUID, err := uuid.Parse(sensorId)
-	if err != nil {
-		return nil, err
-	}
-	var sensor Sensor
-	if res := s.db.First(&sensor, sensorUUID); res.Error != nil {
-		return nil, res.Error
-	} else {
-		return &sensor, nil
-	}
-}
-
-// GetSensorStreamManager gets the stream.Manager for the sensor
-func (s *SensorClient) GetSensorStreamManager(sensorId string) (*stream.Manager, bool) {
-	streamManager, found := s.sensorStreamManagers[sensorId]
-	return streamManager, found
+// GetSensor retrieves the sensor out of the sensor cache
+func (s *SensorClient) GetSensor(sensorId string) (*Sensor, bool) {
+	sensor, found := s.sensors[sensorId]
+	return sensor, found
 }
 
 // PublishSensorReading sends a message to the sensor's streamManager
 func (s *SensorClient) PublishSensorReading(sensorId string, data []byte) error {
-	streamManager, found := s.GetSensorStreamManager(sensorId)
+	sensor, found := s.GetSensor(sensorId)
 	if !found {
-		return fmt.Errorf("sensor stream.Manager for %s not found", sensorId)
+		return fmt.Errorf("sensor %s not found", sensorId)
 	}
-	streamManager.Send(data)
+	sensor.StreamManager.Send(data)
 	return nil
 }
 
 // Add a client to the sensor, and return the client stream
 func (s *SensorClient) AddClientStream(sensorId string, clientId string) (*stream.Stream, error) {
-	streamManager, found := s.GetSensorStreamManager(sensorId)
+	sensor, found := s.GetSensor(sensorId)
 	if !found {
-		return nil, fmt.Errorf("stream for sensor not found")
+		return nil, fmt.Errorf("sensor %s not found", sensorId)
 	}
-	if err := streamManager.AddClient(clientId); err != nil {
+	if err := sensor.StreamManager.AddClient(clientId); err != nil {
 		return nil, err
 	}
-	if clientStream, found := streamManager.ClientStream(clientId); !found {
-		return nil, fmt.Errorf("client stream for sensor not found")
+	if clientStream, found := sensor.StreamManager.ClientStream(clientId); !found {
+		panic(fmt.Errorf("client stream for sensor not found"))
 	} else {
 		return clientStream, nil
 	}
 }
 
 func (s *SensorClient) RemoveClientStream(sensorId string, clientId string) {
-	sensorStream, found := s.GetSensorStreamManager(sensorId)
+	sensor, found := s.GetSensor(sensorId)
 	if !found {
-		log.Println("tried to remove a client stream that didn't exist")
+		log.Println("tried to remove a client stream from a sensor that didn't exist")
 		return
 	}
-	sensorStream.RemoveClient(clientId)
+	sensor.StreamManager.RemoveClient(clientId)
 }
 
 // DeleteSensor deletes a sensor by its id
@@ -168,33 +279,35 @@ func (s *SensorClient) DeleteSensor(sensorId string) error {
 	if res := s.db.Delete(&sensor, sensorUUID); res.Error != nil {
 		return res.Error
 	}
-	delete(s.sensorStreamManagers, sensor.ID.String())
+	delete(s.sensors, sensor.ID.String())
 	return nil
 }
 
 func (s *SensorClient) UpdateSensor(sensorId string, updateSensorBody *UpdateSensorBody) (*Sensor, error) {
-	sensorUUID, err := uuid.Parse(sensorId)
-	if err != nil {
-		return nil, err
-	}
-	var sensor Sensor
-	if res := s.db.First(&sensor, sensorUUID); res.Error != nil {
-		return nil, res.Error
-	}
+	sensor := s.sensors[sensorId]
 	sensor.update(updateSensorBody)
 	if res := s.db.Save(&sensor); res.Error != nil {
 		return nil, res.Error
 	} else {
-		return &sensor, nil
+		return sensor, nil
 	}
 }
 
-// list sensors
-func (s *SensorClient) ListSensors() ([]*Sensor, error) {
-	sensors := make([]*Sensor, 0)
+// listSensorsFromDb returns the sensors from the database
+func (s *SensorClient) listSensorsFromDb() ([]*Sensor, error) {
+	var sensors []*Sensor
 	if res := s.db.Find(&sensors); res.Error != nil {
 		return nil, res.Error
 	} else {
 		return sensors, nil
 	}
+}
+
+// ListSensors returns the sensors from the cache
+func (s *SensorClient) ListSensors() []*Sensor {
+	sensors := make([]*Sensor, 0)
+	for _, sensor := range s.sensors {
+		sensors = append(sensors, sensor)
+	}
+	return sensors
 }

@@ -22,7 +22,7 @@ export default {
   },
   created() {
     console.log('Starting connection to WebSocket Server');
-    this.connection = apiClient.readSensorSocket(this.$props.camera.id, 'monitect-ui');
+    this.connection = apiClient.getSensorSocket(this.$props.camera.id, 'monitect-ui');
     this.connection.onopen = function () {
       console.log('Successfully connected to the websocket server...');
     };

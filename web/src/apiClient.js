@@ -10,13 +10,13 @@ function getSensors() {
   return axios.get(url).then((response) => response.data.sensors);
 }
 
-function readSensorSocket(sensorId, clientId) {
+function getSensorSocket(sensorId, clientId) {
   const wsUrl = `${wsBaseUrl}/sensors/${sensorId}/read?clientId=${clientId}`;
   console.log(`connecting to socket ${wsUrl}`);
   return new WebSocket(wsUrl);
 }
 
 export default {
-  readSensorSocket,
+  getSensorSocket,
   getSensors,
 };

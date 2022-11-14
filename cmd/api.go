@@ -82,7 +82,9 @@ func (m *Monitect) Start(addr string) {
 	log.Printf("starting server @ %s", addr)
 	m.router.Use(requestLogger)
 	m.registerRoutes()
-	http.ListenAndServe(addr, m.router)
+	if err := http.ListenAndServe(addr, m.router); err != nil {
+		log.Fatalf("unable to serve: %s", err)
+	}
 }
 
 func (m *Monitect) createSensor(w http.ResponseWriter, r *http.Request) {
@@ -100,8 +102,8 @@ func (m *Monitect) createSensor(w http.ResponseWriter, r *http.Request) {
 
 func (m *Monitect) getSensor(w http.ResponseWriter, r *http.Request) {
 	sensorId := mux.Vars(r)["sensorId"]
-	if sensor, err := m.SensorClient.GetSensor(sensorId); err != nil {
-		common.WriteBody(w, http.StatusInternalServerError, &ErrorResponse{Msg: "Unable to get sensor", Err: err})
+	if sensor, found := m.SensorClient.GetSensor(sensorId); !found {
+		common.WriteBody(w, http.StatusNotFound, &ErrorResponse{Msg: "sensor not found"})
 	} else {
 		common.WriteBody(w, http.StatusOK, sensor)
 	}
@@ -122,11 +124,8 @@ func (m *Monitect) updateSensor(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Monitect) listSensors(w http.ResponseWriter, r *http.Request) {
-	if sensors, err := m.SensorClient.ListSensors(); err != nil {
-		common.WriteBody(w, http.StatusInternalServerError, &ErrorResponse{Msg: "Unable to list sensors", Err: err})
-	} else {
-		common.WriteBody(w, http.StatusOK, &ListSensorsResponse{Sensors: sensors, Count: len(sensors)})
-	}
+	sensors := m.SensorClient.ListSensors()
+	common.WriteBody(w, http.StatusOK, &ListSensorsResponse{Sensors: sensors, Count: len(sensors)})
 }
 
 func (m *Monitect) deleteSensor(w http.ResponseWriter, r *http.Request) {
@@ -147,6 +146,7 @@ func (m *Monitect) publishToStreamFromWebsocket(ws *websocket.Conn, sensorStream
 	for {
 		ws.SetReadDeadline(time.Now().Add(10 * time.Second))
 		_, d, err := ws.ReadMessage()
+		log.Printf("got a message (%d)", len(d))
 		if err != nil {
 			return
 		}
@@ -157,7 +157,7 @@ func (m *Monitect) publishToStreamFromWebsocket(ws *websocket.Conn, sensorStream
 // publishSensorFeed is used by a sensor to publish new readings
 func (m *Monitect) publishSensorFeed(w http.ResponseWriter, r *http.Request) {
 	sensorId := mux.Vars(r)["sensorId"]
-	sensorStream, found := m.SensorClient.GetSensorStreamManager(sensorId)
+	sensor, found := m.SensorClient.GetSensor(sensorId)
 	if !found {
 		common.WriteBody(w, http.StatusNotFound, &ErrorResponse{Msg: "sensor stream not found " + sensorId})
 		return
@@ -169,7 +169,7 @@ func (m *Monitect) publishSensorFeed(w http.ResponseWriter, r *http.Request) {
 		return
 	} else {
 		// hand off the processing to another thread so that we can complete this request
-		go m.publishToStreamFromWebsocket(ws, sensorStream)
+		go m.publishToStreamFromWebsocket(ws, sensor.StreamManager)
 	}
 }
 

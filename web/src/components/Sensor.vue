@@ -4,7 +4,7 @@
     .title.is-3 {{ sensor.name || '' }}
     .box
       .title.is-4 {{ latestSensorReading.value }} ({{ sensor.unit || '' }})
-      .subtitle.is-6 {{ latestSensorReading.createdTime }}
+      //- .subtitle.is-6 {{ latestSensorReading.createdTime }}
 </template>
 
 <script>
@@ -24,14 +24,15 @@ export default {
   },
   created() {
     console.log('Starting connection to WebSocket Server');
-    this.connection = apiClient.readSensorSocket(this.$props.sensor.id, 'monitect-ui');
+    this.connection = apiClient.getSensorSocket(this.$props.sensor.id, 'monitect-ui');
     this.connection.onopen = function () {
       console.log('Successfully connected to the websocket server...');
     };
   },
   mounted() {
     this.connection.onmessage = (event) => {
-      this.imageBase64 = event.data;
+      console.log(`here is the event data: ${event.data}`);
+      this.latestSensorReading = event.data;
     };
   },
 };
