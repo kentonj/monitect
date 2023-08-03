@@ -48,19 +48,21 @@ type Sensor struct {
 
 type SensorReading struct {
 	storage.Base
-	Value interface{} `json:"value"`
+	Sensor   Sensor    `gorm:"constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
+	SensorID uuid.UUID `json:"sensorId"`
+	Value    []byte    `json:"value"`
 }
 
 type CreateSensorBody struct {
-	Name string     `json:"name"`
-	Type SensorType `json:"type"`
-	Unit string     `json:"unit"`
+	Name        string            `json:"name"`
+	Type        SensorType        `json:"type"`
+	ReadingType SensorReadingType `json:"readingType"`
 }
 
 type UpdateSensorBody struct {
-	Name string     `json:"name"`
-	Type SensorType `json:"type"`
-	Unit string     `json:"unit"`
+	Name        string            `json:"name"`
+	Type        SensorType        `json:"type"`
+	ReadingType SensorReadingType `json:"readingType"`
 }
 
 type ListSensorsResponse struct {
@@ -73,7 +75,7 @@ func NewSensorClient(db *gorm.DB) *SensorClient {
 	if err := db.AutoMigrate(&Sensor{}, &SensorReading{}); err != nil {
 		log.Fatal("Could not automigrate the sensor object")
 	} else {
-		log.Println("Migrated sensors")
+		log.Println("Migrated Sensor and SensorReading")
 	}
 	client := SensorClient{db: db, sensors: make(map[string]*Sensor)}
 	if sensors, err := client.listSensorsFromDb(); err != nil {
@@ -89,25 +91,26 @@ func NewSensorClient(db *gorm.DB) *SensorClient {
 	return &client
 }
 
-func parseSensorReadingValue(data []byte, readingType SensorReadingType) (interface{}, error) {
+// parseSensorReadingValue reads the byte array into the correct data type based on the provided SensorReadingType
+func parseSensorReadingValue(value []byte, readingType SensorReadingType) (interface{}, error) {
 	switch readingType {
 	case Base64Type:
 		var s string
-		if err := json.Unmarshal(data, &s); err != nil {
+		if err := json.Unmarshal(value, &s); err != nil {
 			return nil, err
 		} else {
 			return s, nil
 		}
 	case FloatType:
 		var f float64
-		if err := json.Unmarshal(data, &f); err != nil {
+		if err := json.Unmarshal(value, &f); err != nil {
 			return nil, err
 		} else {
 			return f, nil
 		}
 	default:
 		var i interface{}
-		if err := json.Unmarshal(data, &i); err != nil {
+		if err := json.Unmarshal(value, &i); err != nil {
 			return nil, err
 		} else {
 			return i, nil
@@ -115,14 +118,10 @@ func parseSensorReadingValue(data []byte, readingType SensorReadingType) (interf
 	}
 }
 
-func NewSensorReading(data []byte, readingType SensorReadingType) (*SensorReading, error) {
-	v, err := parseSensorReadingValue(data, readingType)
-	if err != nil {
-		return nil, err
-	}
-	sr := SensorReading{Value: v}
+func NewSensorReading(sensorID uuid.UUID, data []byte) *SensorReading {
+	sr := SensorReading{SensorID: sensorID, Value: data}
 	sr.AssignUUID()
-	return &sr, nil
+	return &sr
 }
 
 func (s *Sensor) readingType() SensorReadingType {
@@ -149,7 +148,6 @@ func (s *SensorClient) monitorReadings(sensor *Sensor, interval time.Duration) {
 	}
 	monitorStream, _ := sensor.StreamManager.ClientStream(sensorReadingMonitorName)
 	dataCh := monitorStream.C()
-	readingType := sensor.readingType()
 	ticker := time.NewTicker(interval)
 	for range ticker.C {
 		select {
@@ -160,26 +158,39 @@ func (s *SensorClient) monitorReadings(sensor *Sensor, interval time.Duration) {
 			for i := 0; i < remainingMessages; i++ {
 				data = <-dataCh
 			}
-			newReading, err := NewSensorReading(data, readingType)
-			if err != nil {
-				log.Fatalf("unable to create a new sensor reading: %s", err)
-			}
+			log.Printf("got latest reading (size %d) on the %s[%s] stream", len(data), sensor.ID, sensorReadingMonitorName)
+			newReading := NewSensorReading(sensor.ID, data)
+			log.Print("here is the new reading")
+			// log.Print(newReading.SensorID)
+			// log.Print(newReading.Sensor)
+			// log.Print(newReading.Type)
 			// overwrite the existing reading, or create a new reading
 			var existingReading SensorReading
-			if res := s.db.Order("createdAt desc").Take(&existingReading); res.Error != nil {
+			if res := s.db.Order("created_at desc").Take(&existingReading); res.Error != nil {
 				if res := s.db.Create(newReading); res.Error != nil {
 					log.Fatalf("unable to create a new reading: %s", res.Error)
 				}
+				log.Printf("no previous reading existed")
 			} else {
 				existingReading.Value = newReading.Value
 				if res := s.db.Save(&existingReading); res.Error != nil {
 					log.Fatalf("unable to update the sensor reading reading: %s", res.Error)
 				}
+				log.Printf("updated the last reading")
 			}
 		default:
 			// do nothing
-			log.Printf("no new readings on the %s stream", sensorReadingMonitorName)
+			log.Printf("no new readings on the %s[%s] stream", sensor.ID, sensorReadingMonitorName)
 		}
+	}
+}
+
+func (s *SensorClient) GetLatestReading(sensorId uuid.UUID) (*SensorReading, error) {
+	latestReading := SensorReading{SensorID: sensorId}
+	if res := s.db.Order("updated_at desc").First(&latestReading); res.Error != nil {
+		return nil, res.Error
+	} else {
+		return &latestReading, nil
 	}
 }
 
@@ -190,8 +201,8 @@ func (s *Sensor) update(u *UpdateSensorBody) {
 	if u.Type != "" {
 		s.Type = u.Type
 	}
-	if u.Unit != "" {
-		s.Unit = u.Unit
+	if u.ReadingType != "" {
+		s.ReadingType = u.ReadingType
 	}
 }
 
@@ -204,9 +215,9 @@ func (body *CreateSensorBody) toSensor() (*Sensor, error) {
 		return nil, errors.New("type cannot be nil")
 	}
 	sensor := Sensor{
-		Name: body.Name,
-		Type: body.Type,
-		Unit: body.Unit,
+		Name:        body.Name,
+		Type:        body.Type,
+		ReadingType: body.ReadingType,
 	}
 	sensor.AssignUUID()
 	return &sensor, nil

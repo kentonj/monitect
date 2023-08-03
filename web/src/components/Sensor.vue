@@ -31,7 +31,6 @@ export default {
   },
   mounted() {
     this.connection.onmessage = (event) => {
-      console.log(`here is the event data: ${event.data}`);
       this.latestSensorReading = event.data;
     };
   },

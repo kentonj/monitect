@@ -3,7 +3,7 @@
   .box
     .title {{ camera.name || '' }}
     .box
-      img(:src="`data:image/png;base64,${imageBase64}`")
+      img(:src="`data:image/jpeg;base64,${imageBase64}`")
 </template>
 
 <script>

@@ -7,7 +7,7 @@ import base64
 
 
 HOST = "localhost:8080"
-CAMERA_ID = "03017f18-da09-417e-8dc8-5d4109090b11"
+CAMERA_ID = "4ac03b16-b77b-4e55-9697-941077a0dd11"
 
 
 async def post_image(websocket, image_path: str):

@@ -2,12 +2,14 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"html/template"
 	"log"
 	"net/http"
 	"os"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 	"github.com/kentonj/monitect/internal/common"
@@ -146,7 +148,6 @@ func (m *Monitect) publishToStreamFromWebsocket(ws *websocket.Conn, sensorStream
 	for {
 		ws.SetReadDeadline(time.Now().Add(10 * time.Second))
 		_, d, err := ws.ReadMessage()
-		log.Printf("got a message (%d)", len(d))
 		if err != nil {
 			return
 		}
@@ -174,14 +175,24 @@ func (m *Monitect) publishSensorFeed(w http.ResponseWriter, r *http.Request) {
 }
 
 // sendReadingsToWebsocket sends messages received on the stream.Stream to the websocket
-func (m *Monitect) sendReadingsToWebsocket(ws *websocket.Conn, clientStream *stream.Stream, closeFunc func()) {
-	pingTicker := time.NewTicker(2 * time.Second)
+func (m *Monitect) sendReadingsToWebsocket(ws *websocket.Conn, sensorId uuid.UUID, clientStream *stream.Stream, closeFunc func()) {
+	pingTicker := time.NewTicker(10 * time.Second)
 	defer func() {
 		closeFunc()
 		pingTicker.Stop()
 		ws.WriteMessage(websocket.CloseMessage, nil)
 		ws.Close()
 	}()
+	if len(clientStream.C()) == 0 {
+		if latestReading, err := m.SensorClient.GetLatestReading(sensorId); err != nil {
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return
+			}
+		} else {
+			log.Printf("no new messages on the client stream, sending the latest reading from %s", latestReading.UpdatedAt)
+			clientStream.Send(latestReading.Value)
+		}
+	}
 	for {
 		select {
 		case data := <-clientStream.C():
@@ -206,18 +217,21 @@ func (m *Monitect) readSensorFeed(w http.ResponseWriter, r *http.Request) {
 	clientStream, err := m.SensorClient.AddClientStream(sensorId, clientId)
 	if err != nil {
 		log.Printf("unable to add a client stream: %s", err)
-		common.WriteBody(w, http.StatusNotFound, &ErrorResponse{Msg: "sensor not found " + sensorId})
 		return
 	}
 	m.upgrader.CheckOrigin = func(r *http.Request) bool { return true }
 	if ws, err := m.upgrader.Upgrade(w, r, nil); err != nil {
 		log.Printf("unable to upgrade the websocket client: %s", err)
-		common.WriteBody(w, http.StatusInternalServerError, &ErrorResponse{Msg: "unable to upgrade to websocket", Err: err})
 		return
 	} else {
-		// hand off the processing to another thread so that we can complete this request
+		// send the first frame, either from the channel, or the latest saved data
+		sensorUUID, err := uuid.Parse(sensorId)
+		if err != nil {
+			return
+		}
 		log.Printf("starting goroutine for sendReadingsToWebsocket")
-		go m.sendReadingsToWebsocket(ws, clientStream, func() { m.SensorClient.RemoveClientStream(sensorId, clientId) })
+		// send the first frame, either from the channel, or the latest saved data
+		go m.sendReadingsToWebsocket(ws, sensorUUID, clientStream, func() { m.SensorClient.RemoveClientStream(sensorId, clientId) })
 	}
 }
 

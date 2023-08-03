@@ -13,7 +13,7 @@ import (
 
 var (
 	addr     = flag.String("addr", "localhost:8080", "http service address")
-	sensorId = flag.String("sensor", "03017f18-da09-417e-8dc8-5d4109090b11", "the sensor id to read from")
+	sensorId = flag.String("sensor", "4ac03b16-b77b-4e55-9697-941077a0dd11", "the sensor id to read from")
 	clientId = flag.String("client", "kenton", "")
 )
 
